@@ -29,9 +29,30 @@ from .ocr_utils import (
     ocr_get_all_texts,
 )
 
+# 导入OCR Watcher（后台监控器）
+try:
+    import sys
+    from pathlib import Path
+
+    # 添加项目根目录到Python路径
+    project_root = Path(__file__).parent.parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    from utils.ocr_watcher import (
+        OcrWatcher,
+        TextWatcher,
+        ocr_watcher,
+        AirtestOcrEngine,
+        AirtestDevice,
+    )
+    _watcher_available = True
+except ImportError:
+    _watcher_available = False
+
 __all__ = [
     "OCRUtils",
-    "ocr_utils", 
+    "ocr_utils",
     "ocr_touch",
     "ocr_double_click",
     "ocr_swipe",
@@ -40,5 +61,15 @@ __all__ = [
     "ocr_wait_text",
     "ocr_get_all_texts",
 ]
+
+# 如果Watcher可用，添加到导出列表
+if _watcher_available:
+    __all__.extend([
+        "OcrWatcher",
+        "TextWatcher",
+        "ocr_watcher",
+        "AirtestOcrEngine",
+        "AirtestDevice",
+    ])
 
 __version__ = "1.0.1"
