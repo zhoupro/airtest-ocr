@@ -31,20 +31,15 @@ from .ocr_utils import (
 
 # 导入OCR Watcher（后台监控器）
 try:
-    import sys
-    from pathlib import Path
-
-    # 添加项目根目录到Python路径
-    project_root = Path(__file__).parent.parent.parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
-    from utils.ocr_watcher import (
+    from .ocr_watcher import (
         OcrWatcher,
         TextWatcher,
         ocr_watcher,
         AirtestOcrEngine,
         AirtestDevice,
+        OcrResult,
+        OcrEngine,
+        DeviceController,
     )
     _watcher_available = True
 except ImportError:
@@ -70,6 +65,9 @@ if _watcher_available:
         "ocr_watcher",
         "AirtestOcrEngine",
         "AirtestDevice",
+        "OcrResult",
+        "OcrEngine",
+        "DeviceController",
     ])
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
