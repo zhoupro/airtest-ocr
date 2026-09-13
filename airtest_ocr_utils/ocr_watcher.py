@@ -106,24 +106,56 @@ class AirtestDevice(DeviceController):
     def __init__(self):
         pass
 
-    def screenshot(self) -> bytes:
+    def screenshot(self) -> Optional[bytes]:
         """获取截图"""
         import io
         from PIL import Image
+        from airtest.core.api import device as _get_device
 
-        # 使用Airtest截图
-        img = snapshot(filename=None)
+        # 通过 airtest 全局设备对象直接截图（返回 ndarray）
+        try:
+            dev = _get_device()
+        except Exception as e:
+            self.logger.warning(f"No active device: {e}") if hasattr(self, 'logger') else None
+            return None
+
+        try:
+            img = dev.snapshot()
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"snapshot failed: {e}")
+            return None
+
+        if img is None:
+            return None
 
         # 转换为bytes
         if isinstance(img, str):
-            # 如果返回的是文件路径，读取文件
             with open(img, 'rb') as f:
                 return f.read()
-        else:
-            # 如果返回的是PIL Image对象
+        elif isinstance(img, Image.Image):
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
             return img_byte_arr.getvalue()
+        else:
+            # numpy.ndarray (BGR) -> PNG bytes
+            try:
+                import cv2
+                ok, buf = cv2.imencode('.png', img)
+                if ok:
+                    return buf.tobytes()
+            except Exception:
+                pass
+            # fallback: 通过 PIL
+            try:
+                pil_img = Image.fromarray(img[..., ::-1])  # BGR -> RGB
+                img_byte_arr = io.BytesIO()
+                pil_img.save(img_byte_arr, format='PNG')
+                return img_byte_arr.getvalue()
+            except Exception as e:
+                if hasattr(self, 'logger'):
+                    self.logger.warning(f"convert image failed: {e}")
+                return None
 
     def click(self, x: int, y: int):
         """点击屏幕"""
@@ -213,7 +245,26 @@ class TextWatcher:
 
 class OcrWatcher:
     """OCR 弹窗监控器，核心控制器"""
-    def __init__(self, device: Optional[DeviceController] = None, ocr_engine: Optional[OcrEngine] = None):
+    def __init__(self, device: Optional[DeviceController] = None, ocr_engine: Optional[OcrEngine] = None,
+                 device_uri: Optional[str] = None):
+        """
+        :param device: 自定义设备控制器（注入用）
+        :param ocr_engine: 自定义 OCR 引擎（注入用）
+        :param device_uri: Airtest 设备 URI，例如 "Android:///" 自动检测、
+                          "Android://localhost:9999" 远程 ADB、
+                          "Android://127.0.0.1:5037/<serialno>" 指定序列号。
+                          传 None 时不主动连接，依赖外部 connect_device。
+        """
+        # 如指定了 device_uri，主动连接设备
+        if device_uri:
+            try:
+                from airtest.core.api import connect_device as _ad_connect
+                _ad_connect(device_uri)
+                self.logger = logging.getLogger("OcrWatcher")
+                self.logger.info(f"Connected to device: {device_uri}")
+            except Exception as e:
+                logging.getLogger("OcrWatcher").warning(f"connect_device({device_uri}) failed: {e}")
+
         # 使用默认实现
         self._device = device if device is not None else AirtestDevice()
         self._ocr = ocr_engine if ocr_engine is not None else AirtestOcrEngine()
@@ -224,6 +275,7 @@ class OcrWatcher:
         self._stop_event = threading.Event()
         self._watch_thread: Optional[threading.Thread] = None
         self._running = False
+        self._device_available = True  # 设备可用状态跟踪
 
         # 日志
         self.logger = logging.getLogger("OcrWatcher")
@@ -239,6 +291,18 @@ class OcrWatcher:
     def when(self, text: str) -> TextWatcher:
         """入口方法：创建新的监控规则"""
         return TextWatcher(self, text)
+
+    def connect(self, device_uri: str):
+        """
+        连接 Android 设备（Airtest 格式）
+        :param device_uri: 例如 "Android:///"、"Android://localhost:9999"、
+                          "Android://127.0.0.1:5037/<serialno>"
+        """
+        from airtest.core.api import connect_device as _ad_connect
+        _ad_connect(device_uri)
+        self._device_available = True
+        self.logger.info(f"Connected to device: {device_uri}")
+        return self
 
     def start(self, interval: float = 1.0):
         """
@@ -289,8 +353,13 @@ class OcrWatcher:
         # 1. 获取截图
         img_bytes = self._device.screenshot()
         if not img_bytes:
-            self.logger.warning("Failed to get screenshot")
+            if self._device_available:
+                self.logger.warning("Failed to get screenshot (no device connected?). Will retry silently.")
+                self._device_available = False
             return
+        if not self._device_available:
+            self.logger.info("Device reconnected, resuming watch loop.")
+            self._device_available = True
 
         # 2. OCR 识别
         ocr_results = self._ocr.recognize(img_bytes)

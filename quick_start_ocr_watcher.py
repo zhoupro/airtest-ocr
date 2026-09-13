@@ -7,6 +7,12 @@ OCR Watcher 快速开始示例
 from airtest_ocr_utils import ocr_watcher
 import time
 
+# 设备连接配置 - 三种常用方式：
+#   "Android:///"                          - 自动选取 adb devices 中第一个设备
+#   "Android://127.0.0.1:5037/<serialno>"  - 指定 adb server 下的设备序列号
+#   "Android://localhost:9999"             - 通过 adb connect 的远程/无线设备
+DEVICE_URI = "Android:///"
+
 def quick_start_example():
     """
     快速开始示例：
@@ -16,11 +22,15 @@ def quick_start_example():
     4. 停止监控
     """
 
+    # ==================== 步骤0: 连接设备 ====================
+    print(f"连接设备: {DEVICE_URI}")
+    ocr_watcher.connect(DEVICE_URI)
+
     # ==================== 步骤1: 配置监控规则 ====================
     print("配置监控规则...")
 
     # 处理权限弹窗
-    ocr_watcher.when("允许").click()
+    ocr_watcher.when("我").click()
     ocr_watcher.when("同意").click()
     ocr_watcher.when("授权").click()
 

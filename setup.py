@@ -12,10 +12,9 @@ setup(
     install_requires=[
         "paddleocr>=2.7.0",
         "paddlepaddle>=2.4.0",
-        "airtest==1.4.3",
         "opencv-python>=4.5.0",
         "Pillow>=8.0.0",
-        "numpy==1.24.0",
+        "numpy==1.26.4",
     ],
     python_requires=">=3.7",
     classifiers=[
