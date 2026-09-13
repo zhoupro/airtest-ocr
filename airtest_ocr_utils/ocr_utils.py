@@ -27,11 +27,16 @@ import cv2
 import numpy as np
 from PIL import ImageGrab, Image, ImageDraw, ImageFont
 
-# 延迟导入PaddleOCR
+try:
+    from .paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+except ImportError:  # 允许直接运行本文件
+    from paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+
+
+# 延迟导入PaddleOCR（兼容 2.x / 3.x）
 def init_paddleocr(lang='ch', use_gpu=False):
     """延迟初始化PaddleOCR"""
-    from paddleocr import PaddleOCR
-    return PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu)
+    return create_paddleocr(lang=lang, use_gpu=use_gpu)
 
 
 class OCRUtils:
@@ -79,12 +84,13 @@ class OCRUtils:
         else:
             debug_image_path = image_path.replace('.png', '_debug.png')
             
-        # 使用PaddleOCR识别
-        result = self.ocr.ocr(image_path, cls=True)
+        # 使用PaddleOCR识别（兼容 2.x / 3.x）
+        result = run_paddleocr(self.ocr, image_path)
         
         # 格式化结果
         formatted_results = []
-        if result and result[0]:
+        lines = parse_paddleocr_result(result)
+        if lines:
             # 读取图片用于调试标注
             if debug:
                 img = cv2.imread(image_path)
@@ -92,10 +98,7 @@ class OCRUtils:
                     # 如果是新截图的，重新读取
                     img = cv2.imread("temp_screenshot.png")
             
-            for line in result[0]:
-                text = line[1][0]
-                confidence = line[1][1]
-                points = line[0]
+            for points, text, confidence in lines:
                 
                 # 计算中心点坐标
                 center_x = sum(point[0] for point in points) / 4
@@ -120,13 +123,13 @@ class OCRUtils:
                 # 调试模式下，在图片上标注识别结果
                 if debug and img is not None:
                     # 计算文字标注位置（在识别框下方）
-                    min_y = min(point[1] for point in line[0])
-                    max_y = max(point[1] for point in line[0])
+                    min_y = min(point[1] for point in points)
+                    max_y = max(point[1] for point in points)
                     text_y = int(max_y) + 20  # 在框下方20像素处
-                    text_x = int(min(point[0] for point in line[0]))  # 使用框的左侧作为起始位置
+                    text_x = int(min(point[0] for point in points))  # 使用框的左侧作为起始位置
                     
                     # 绘制识别框（绿色）
-                    points_np = np.array(line[0], dtype=np.int32)
+                    points_np = np.array(points, dtype=np.int32)
                     cv2.polylines(img, [points_np], True, (0, 255, 0), 2)
                     
                     # 绘制红色文字（使用putText，对于中文可能会显示问号）

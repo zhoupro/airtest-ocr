@@ -3,6 +3,7 @@ OCR Watcher - 后台监控器
 整合参考代码的链式API和后台监控功能到本地方案
 """
 
+import os
 import threading
 import time
 import logging
@@ -14,6 +15,11 @@ from airtest.core.api import snapshot, touch
 import tempfile
 import cv2
 import numpy as np
+
+try:
+    from .paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+except ImportError:  # 允许直接运行本文件
+    from paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
 
 
 @dataclass
@@ -39,10 +45,9 @@ class OcrEngine(ABC):
 
 
 class AirtestOcrEngine(OcrEngine):
-    """基于Airtest和PaddleOCR的OCR引擎"""
+    """基于Airtest和PaddleOCR的OCR引擎（兼容 PaddleOCR 2.x / 3.x）"""
     def __init__(self, lang='ch', use_gpu=False):
-        from paddleocr import PaddleOCR
-        self._ocr = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu, show_log=False)
+        self._ocr = create_paddleocr(lang=lang, use_gpu=use_gpu)
         self.confidence_threshold = 0.7
 
     def set_confidence_threshold(self, threshold: float):
@@ -56,15 +61,12 @@ class AirtestOcrEngine(OcrEngine):
             f.write(image_bytes)
             temp_path = f.name
 
-        results = self._ocr.ocr(temp_path, cls=True)
+        try:
+            results = run_paddleocr(self._ocr, temp_path)
 
-        ocr_results = []
-        if results and results[0]:
-            for line in results[0]:
-                bbox = line[0]  # [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-                text = line[1][0]
-                conf = line[1][1]
-
+            ocr_results = []
+            for bbox, text, conf in parse_paddleocr_result(results):
+                # bbox: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
                 # 转换为简单矩形 (x1, y1, x2, y2)
                 xs = [p[0] for p in bbox]
                 ys = [p[1] for p in bbox]
@@ -82,7 +84,12 @@ class AirtestOcrEngine(OcrEngine):
                     points=[(int(p[0]), int(p[1])) for p in bbox]
                 ))
 
-        return ocr_results
+            return ocr_results
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 class DeviceController(ABC):
