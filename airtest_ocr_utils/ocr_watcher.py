@@ -3,23 +3,24 @@ OCR Watcher - 后台监控器
 整合参考代码的链式API和后台监控功能到本地方案
 """
 
+import logging
 import os
+import re
+import tempfile
 import threading
 import time
-import logging
-import re
-from typing import List, Dict, Callable, Optional, Tuple
-from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from airtest.core.api import snapshot, touch
-import tempfile
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
+from airtest.core.api import snapshot, touch
 
 try:
-    from .paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+    from .paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
 except ImportError:  # 允许直接运行本文件
-    from paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+    from paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
 
 
 @dataclass
@@ -116,8 +117,9 @@ class AirtestDevice(DeviceController):
     def screenshot(self) -> Optional[bytes]:
         """获取截图"""
         import io
-        from PIL import Image
+
         from airtest.core.api import device as _get_device
+        from PIL import Image
 
         # 通过 airtest 全局设备对象直接截图（返回 ndarray）
         try:

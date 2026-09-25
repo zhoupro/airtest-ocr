@@ -2,9 +2,9 @@
 OCR Watcher 类型存根文件
 """
 
-from typing import List, Dict, Callable, Optional, Tuple
 from abc import ABC
 from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Tuple
 
 @dataclass
 class OcrResult:

@@ -1,6 +1,5 @@
 from airtest.core.api import *
 from airtest.core.win import Windows
-
 from airtest_ocr_utils import ocr_touch  # Windows 平台专用
 
 # 首先连接Windows设备

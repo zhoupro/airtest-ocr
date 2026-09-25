@@ -3,7 +3,7 @@ OCR工具类的类型存根文件
 """
 
 import time
-from typing import List, Tuple, Dict, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 class OCRUtils:
     def __init__(self, lang: str = 'ch', use_gpu: bool = False) -> None: ...

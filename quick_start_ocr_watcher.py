@@ -4,8 +4,9 @@ OCR Watcher 快速开始示例
 演示最简单的使用方式
 """
 
-from airtest_ocr_utils import ocr_watcher
 import time
+
+from airtest_ocr_utils import ocr_watcher
 
 # 设备连接配置 - 三种常用方式：
 #   "Android:///"                          - 自动选取 adb devices 中第一个设备

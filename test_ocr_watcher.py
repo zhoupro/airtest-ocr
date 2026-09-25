@@ -4,9 +4,10 @@ OCR Watcher 测试示例
 演示如何使用整合后的OCR后台监控功能
 """
 
-from airtest_ocr_utils import ocr_watcher
-import time
 import logging
+import time
+
+from airtest_ocr_utils import ocr_watcher
 
 # 配置日志
 logging.basicConfig(
@@ -117,7 +118,7 @@ def test_custom_device():
     print("测试4: 自定义设备控制")
     print("=" * 60)
 
-    from airtest_ocr_utils import OcrWatcher, AirtestOcrEngine, AirtestDevice
+    from airtest_ocr_utils import AirtestDevice, AirtestOcrEngine, OcrWatcher
 
     # 创建自定义实例
     device = AirtestDevice()

@@ -17,20 +17,21 @@ os.environ['FLAGS_fraction_of_gpu_memory_to_use'] = '0.1'
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
+import random
 # 延迟导入PaddleOCR，确保环境变量生效
 import time
-import random
-from typing import List, Tuple, Dict, Optional
-from airtest.core.api import *
-from airtest.core.cv import Template
+from typing import Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-from PIL import ImageGrab, Image, ImageDraw, ImageFont
+from airtest.core.api import *
+from airtest.core.cv import Template
+from PIL import Image, ImageDraw, ImageFont, ImageGrab
 
 try:
-    from .paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+    from .paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
 except ImportError:  # 允许直接运行本文件
-    from paddleocr_compat import create_paddleocr, run_paddleocr, parse_paddleocr_result
+    from paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
 
 
 # 延迟导入PaddleOCR（兼容 2.x / 3.x）
