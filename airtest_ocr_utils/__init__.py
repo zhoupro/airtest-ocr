@@ -22,8 +22,9 @@ from .ocr_utils import OCRUtils, ocr_double_click, ocr_find_text_with_offset, oc
 
 # 导入OCR Watcher（后台监控器）
 try:
-    from .ocr_watcher import AirtestDevice, AirtestOcrEngine, DeviceController, OcrEngine, OcrResult, OcrWatcher, \
-        TextWatcher, ocr_watcher
+    from .ocr_watcher import AirtestDevice, AirtestImageMatcher, AirtestOcrEngine, DeviceController, \
+        ImageMatcher, ImageMatchResult, ImageWatcher, OcrEngine, OcrResult, OcrWatcher, TextWatcher, \
+        ocr_watcher
     _watcher_available = True
 except ImportError:
     _watcher_available = False
@@ -45,12 +46,16 @@ if _watcher_available:
     __all__.extend([
         "OcrWatcher",
         "TextWatcher",
+        "ImageWatcher",
         "ocr_watcher",
         "AirtestOcrEngine",
+        "AirtestImageMatcher",
         "AirtestDevice",
         "OcrResult",
+        "ImageMatchResult",
         "OcrEngine",
+        "ImageMatcher",
         "DeviceController",
     ])
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

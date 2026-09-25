@@ -251,6 +251,42 @@ finally:
 
 ## 高级功能
 
+### 0. 图片监控（当图片出现，干啥）
+
+Watcher 同时支持文本（OCR）和图片（Airtest 模板匹配）两类规则，写法对称：
+
+```python
+from airtest.core.api import Template
+
+# 路径方式（最简）
+ocr_watcher.when_image("tpl/skip.png").click()
+
+# Template 对象方式（推荐用于跨分辨率场景）
+ocr_watcher.when_image(
+    Template("tpl/login_btn.png", threshold=0.8,
+             record_pos=(0.5, 0.9), resolution=(1080, 1920))
+).region(0, 1500, 1080, 1920).cooldown(10).click()
+
+# 多模板（或关系）：出现任意一个就触发
+ocr_watcher.when_image("tpl/a.png").when_image("tpl/b.png").click()
+
+# 自定义回调（回调收到 ImageMatchResult）
+def on_hit(img_res, dev):
+    print(f"hit {img_res.template_path} conf={img_res.confidence:.2f} at {img_res.center}")
+ocr_watcher.when_image("tpl/popup.png").call(on_hit)
+
+# 全局阈值（覆盖默认 0.7）
+ocr_watcher.set_image_threshold(0.8)
+```
+
+图片监控与文本监控**可以混用**，由同一个后台线程轮询触发：
+
+```python
+ocr_watcher.when("允许").click()                         # 文本
+ocr_watcher.when_image("tpl/skip.png").click()           # 图片
+ocr_watcher.start(interval=1.0)                          # 一起跑
+```
+
 ### 1. 置信度阈值
 
 ```python
@@ -298,11 +334,13 @@ ocr_watcher \
 
 | 方法 | 参数 | 说明 |
 |------|------|------|
-| `when(text)` | `text: str` | 创建监控规则 |
+| `when(text)` | `text: str` | 创建文本监控规则（TextWatcher） |
+| `when_image(template)` | `template: str \| Template` | 创建图片监控规则（ImageWatcher），语义：当图片出现，干啥 |
 | `start(interval)` | `interval: float` | 启动监控线程 |
 | `stop()` | - | 停止监控线程 |
 | `clear()` | - | 清空所有规则 |
-| `set_confidence_threshold(threshold)` | `threshold: float` | 设置全局置信度 |
+| `set_confidence_threshold(threshold)` | `threshold: float` | 设置全局 OCR 置信度 |
+| `set_image_threshold(threshold)` | `threshold: float` | 设置全局图片匹配置信度 |
 
 ### TextWatcher
 
@@ -316,6 +354,25 @@ ocr_watcher \
 | `click()` | - | 点击文字中心 |
 | `dismiss()` | - | 按返回键 |
 | `call(callback)` | `callback: Callable` | 自定义回调 |
+
+### ImageWatcher（语义：当图片出现，干啥）
+
+| 方法 | 参数 | 说明 |
+|------|------|------|
+| `when_image(template)` | `template: str \| Template` | 添加模板（或关系） |
+| `threshold(value)` | `value: float` | 设置匹配置信度（覆盖全局默认） |
+| `region(x1, y1, x2, y2)` | - | 限定搜索区域（提升性能、减少误命中） |
+| `cooldown(seconds)` | `seconds: float` | 设置冷却时间 |
+| `click()` | - | 点击命中图片中心 |
+| `dismiss()` | - | 按返回键 |
+| `call(callback)` | `callback: Callable[[ImageMatchResult, DeviceController], None]` | 自定义回调 |
+
+`ImageMatchResult` 字段：
+- `template_path`: 模板文件路径
+- `bbox`: `(x1, y1, x2, y2)`
+- `center`: `(cx, cy)`
+- `confidence`: 匹配置信度
+- `points`: 4 个角点 `[(x1,y1), (x2,y1), (x2,y2), (x1,y2)]`
 
 ## 注意事项
 
@@ -369,6 +426,16 @@ ocr_watcher.when("广告").cooldown(30).click()
 ```
 
 ## 更新日志
+
+### v1.2.0 (2025-xx-xx)
+- **新增图片监控能力**：`when_image()` + `ImageWatcher`，语义"当图片出现，干啥"
+- 基于 `airtest.Template` / `aircv.find_template`，支持跨分辨率 / 多尺度
+- 新增 `ImageMatchResult` / `ImageMatcher` / `AirtestImageMatcher`
+- 新增 `set_image_threshold()` 全局阈值设置
+- 图片 + 文本规则可在同一个 watcher 中混合使用
+
+### v1.1.0 (2025-01-30)
+- 将 watch 逻辑收敛到 airtest_ocr_utils 包中，提供统一导入入口
 
 ### v1.0.0 (2025-01-30)
 - 整合参考代码的OCR后台监控功能

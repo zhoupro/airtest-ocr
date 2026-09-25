@@ -7,12 +7,14 @@
 ## 新增文件
 
 ### 1. `third/airtest-ocr/airtest_ocr_utils/ocr_watcher.py`
-核心OCR监控器模块，包含：
-- `OcrWatcher`: 主控制器，管理后台监控线程
-- `TextWatcher`: 规则构建器，支持链式API
+核心OCR / 图片监控器模块，包含：
+- `OcrWatcher`: 主控制器，管理后台监控线程，同时支持文本与图片规则
+- `TextWatcher`: 文本规则构建器，支持链式API
+- `ImageWatcher`: 图片规则构建器（语义：当图片出现，干啥）
 - `AirtestOcrEngine`: 基于Airtest和PaddleOCR的OCR引擎
+- `AirtestImageMatcher`: 基于Airtest Template / aircv 的图片匹配引擎
 - `AirtestDevice`: 基于Airtest的设备控制器
-- `OcrResult`: OCR识别结果数据类
+- `OcrResult` / `ImageMatchResult`: 识别结果数据类
 
 ### 2. `utils/OCR_WATCHER_GUIDE.md`
 详细使用指南，包含：
@@ -251,9 +253,11 @@ python utils/test_ocr_watcher.py
 ## 版本信息
 
 - **整合日期**: 2025-01-30
-- **版本**: 1.1.0
+- **版本**: 1.2.0
 - **兼容性**: 与原有OCR工具完全兼容
-- **更新内容**: 将 watch 逻辑收敛到 airtest_ocr_utils 包中
+- **更新内容**:
+  - 将 watch 逻辑收敛到 airtest_ocr_utils 包中
+  - 新增图片监控（`when_image`）能力，支持模板匹配 / 跨分辨率
 
 ## 反馈与改进
 

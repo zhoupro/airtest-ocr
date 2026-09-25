@@ -1,6 +1,10 @@
 """
-OCR Watcher - 后台监控器
+OCR / Image Watcher - 后台监控器
 整合参考代码的链式API和后台监控功能到本地方案
+
+支持两种监控源：
+- 文本监控：PaddleOCR 识别屏幕文字，匹配关键字后触发动作
+- 图片监控：Airtest 模板匹配，识别屏幕图片后触发动作（语义：当图片出现，干啥）
 """
 
 import logging
@@ -11,11 +15,11 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from airtest.core.api import snapshot, touch
+from airtest.core.api import Template, snapshot, touch
 
 try:
     from .paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
@@ -31,6 +35,16 @@ class OcrResult:
     confidence: float   # 置信度
     center: Tuple[float, float]  # 中心点坐标
     points: List[Tuple[int, int]]  # 四个角点坐标
+
+
+@dataclass
+class ImageMatchResult:
+    """图片模板匹配结果（与 OcrResult 对齐，便于统一回调处理）"""
+    template_path: str                        # 模板图片路径（或 Template.filepath）
+    bbox: Tuple[int, int, int, int]           # 边界框 (x1, y1, x2, y2)
+    confidence: float                         # 匹配置信度
+    center: Tuple[float, float]               # 命中中心点坐标
+    points: List[Tuple[int, int]]             # 四个角点坐标
 
 
 class OcrEngine(ABC):
@@ -91,6 +105,157 @@ class AirtestOcrEngine(OcrEngine):
                 os.unlink(temp_path)
             except OSError:
                 pass
+
+
+class ImageMatcher(ABC):
+    """图片模板匹配引擎抽象基类"""
+    @abstractmethod
+    def match(self, image_bytes: bytes, template: Union[str, Template],
+              threshold: Optional[float] = None,
+              region: Optional[Tuple[int, int, int, int]] = None
+              ) -> Optional[ImageMatchResult]:
+        """
+        在 image_bytes（截图）中搜索 template。
+        :param image_bytes: 截图 PNG/JPEG 字节流
+        :param template: 模板图片路径，或已构造好的 airtest.Template
+        :param threshold: 置信度阈值，覆盖默认
+        :param region: 限定搜索区域 (x1, y1, x2, y2)，加速匹配
+        :return: 命中返回 ImageMatchResult，否则 None
+        """
+        pass
+
+    @abstractmethod
+    def set_threshold(self, threshold: float):
+        """设置默认置信度阈值"""
+        pass
+
+
+class AirtestImageMatcher(ImageMatcher):
+    """基于 Airtest 模板匹配的图片引擎
+
+    - 支持传路径（自动 Template 化并缓存）
+    - 也支持直接传 airtest.Template 对象（使用其自带 threshold/rgb/record_pos/resolution 等参数）
+    - 默认行为与 airtest 1.x 一致（kaze/sift 等策略由 ST.CVSTRATEGY 控制）
+    """
+    def __init__(self, threshold: float = 0.7, rgb: bool = False):
+        self.threshold = threshold
+        self.rgb = rgb
+        # 缓存：路径 -> Template（仅缓存传 path 的情况；用户自构造 Template 不缓存以避免误用）
+        self._cache: Dict[str, Template] = {}
+        self._logger = logging.getLogger("AirtestImageMatcher")
+
+    def _safe_log(self, msg: str):
+        """容错日志（logger 未配置 handler 时不抛异常）"""
+        try:
+            self._logger.debug(msg)
+        except Exception:
+            pass
+
+    def set_threshold(self, threshold: float):
+        self.threshold = threshold
+
+    def _get_template(self, template: Union[str, Template], threshold: Optional[float]) -> Template:
+        """规范化模板对象，并按需克隆以应用临时 threshold"""
+        if isinstance(template, Template):
+            base = template
+        else:
+            path = str(template)
+            if path not in self._cache:
+                self._cache[path] = Template(path, threshold=self.threshold, rgb=self.rgb)
+            base = self._cache[path]
+
+        th = threshold if threshold is not None else base.threshold or self.threshold
+        # 若 threshold 与当前一致则复用，避免每次 clone
+        if th == base.threshold:
+            return base
+        return Template(
+            base.filepath,
+            threshold=th,
+            target_pos=base.target_pos,
+            record_pos=base.record_pos,
+            resolution=base.resolution,
+            rgb=base.rgb,
+            scale_max=base.scale_max,
+            scale_step=base.scale_step,
+        )
+
+    @staticmethod
+    def _decode(image_bytes: bytes, region: Optional[Tuple[int, int, int, int]]) -> Optional[np.ndarray]:
+        """将 PNG 字节流解码为 BGR ndarray，可选裁剪到 region"""
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        screen = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if screen is None:
+            return None
+        if region is not None:
+            x1, y1, x2, y2 = region
+            h, w = screen.shape[:2]
+            # 钳制到合法范围，避免越界
+            x1c, y1c = max(0, int(x1)), max(0, int(y1))
+            x2c, y2c = min(w, int(x2)), min(h, int(y2))
+            if x2c > x1c and y2c > y1c:
+                screen = screen[y1c:y2c, x1c:x2c]
+        return screen
+
+    def match(self, image_bytes: bytes, template: Union[str, Template],
+              threshold: Optional[float] = None,
+              region: Optional[Tuple[int, int, int, int]] = None
+              ) -> Optional[ImageMatchResult]:
+        screen = self._decode(image_bytes, region)
+        if screen is None:
+            return None
+
+        # 模板文件不存在时静默返回 None（避免 airtest 抛异常）
+        if isinstance(template, str):
+            if not os.path.isfile(template):
+                return None
+        else:
+            fp = getattr(template, "filepath", None) or getattr(template, "filename", None)
+            if fp and not os.path.isfile(fp):
+                return None
+
+        tpl = self._get_template(template, threshold)
+
+        # Template._cv_match 返回 False 或 {result, rectangle, confidence}
+        try:
+            match_result = tpl._cv_match(screen)
+        except Exception as e:
+            self._safe_log(f"aircv match failed for {template}: {e}")
+            return None
+        if not match_result:
+            return None
+
+        rectangle = match_result.get("rectangle") or []
+        confidence = float(match_result.get("confidence", 0.0))
+        cx, cy = match_result.get("result", (0, 0))
+
+        if not rectangle:
+            # 极端兜底：以 result 为中心点
+            return ImageMatchResult(
+                template_path=tpl.filepath,
+                bbox=(int(cx), int(cy), int(cx), int(cy)),
+                confidence=confidence,
+                center=(float(cx), float(cy)),
+                points=[(int(cx), int(cy))] * 4,
+            )
+
+        # rectangle 是 4 个角点 [(x1,y1),(x2,y1),(x2,y2),(x1,y2)]
+        # 若指定了 region，坐标需要偏移回原图坐标系
+        offset_x = int(region[0]) if region else 0
+        offset_y = int(region[1]) if region else 0
+
+        pts = [(int(p[0]) + offset_x, int(p[1]) + offset_y) for p in rectangle]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+        center = (float(cx) + offset_x, float(cy) + offset_y)
+
+        return ImageMatchResult(
+            template_path=tpl.filepath,
+            bbox=bbox,
+            confidence=confidence,
+            center=center,
+            points=pts,
+        )
 
 
 class DeviceController(ABC):
@@ -228,6 +393,7 @@ class TextWatcher:
         callback: function(ocr_result, device)
         """
         rule = {
+            "type": "text",
             "keywords": self._keywords.copy(),
             "mode": self._match_mode,
             "region": self._region,
@@ -252,13 +418,87 @@ class TextWatcher:
         return self.call(lambda res, dev: dev.press_back())
 
 
+class ImageWatcher:
+    """
+    图片监控规则构建器，链式 API：
+        watcher.when_image("tpl_btn.png").click()
+        watcher.when_image(Template("tpl_btn.png", threshold=0.8)).click()
+
+    语义：当图片出现，干啥（click / dismiss / 自定义 call）。
+    """
+    def __init__(self, parent: "OcrWatcher", template: Union[str, Template, None] = None):
+        self._parent = parent
+        self._templates: List[Union[str, Template]] = []
+        if template is not None:
+            self._templates.append(template)
+        self._threshold: Optional[float] = None  # 置信度阈值（None 则用全局默认）
+        self._region: Optional[Tuple[int, int, int, int]] = None  # 限定搜索区域
+        self._cooldown: float = 0  # 冷却时间（秒）
+        self._last_triggered: float = 0
+
+    def when_image(self, template: Union[str, Template]):
+        """添加更多图片模板（或关系：任一命中即触发）"""
+        self._templates.append(template)
+        return self
+
+    def threshold(self, value: float):
+        """设置置信度阈值（覆盖全局默认）"""
+        self._threshold = value
+        return self
+
+    def region(self, x1: int, y1: int, x2: int, y2: int):
+        """限定搜索区域以加速匹配 / 减少误命中"""
+        self._region = (x1, y1, x2, y2)
+        return self
+
+    def cooldown(self, seconds: float):
+        """冷却时间，防止短时间内重复触发"""
+        self._cooldown = seconds
+        return self
+
+    def call(self, callback: Callable[[ImageMatchResult, DeviceController], None]):
+        """
+        注册自定义回调
+        callback: function(image_match_result, device)
+        """
+        rule = {
+            "type": "image",
+            "templates": self._templates.copy(),
+            "threshold": self._threshold,
+            "region": self._region,
+            "callback": callback,
+            "cooldown": self._cooldown,
+            "last_triggered": self._last_triggered,
+        }
+        self._parent._watchers.append(rule)
+        return self
+
+    def click(self):
+        """内置回调：点击命中图片的中心位置"""
+        def _click_handler(img_result: ImageMatchResult, device: DeviceController):
+            x, y = img_result.center
+            device.click(int(x), int(y))
+            self._parent.logger.info(
+                f"Clicked image [{os.path.basename(img_result.template_path)}] "
+                f"at ({int(x)}, {int(y)}), conf={img_result.confidence:.3f}"
+            )
+        return self.call(_click_handler)
+
+    def dismiss(self):
+        """内置回调：按返回键（常用于关闭弹窗）"""
+        return self.call(lambda res, dev: dev.press_back())
+
+
 class OcrWatcher:
-    """OCR 弹窗监控器，核心控制器"""
-    def __init__(self, device: Optional[DeviceController] = None, ocr_engine: Optional[OcrEngine] = None,
+    """OCR / 图片弹窗监控器，核心控制器"""
+    def __init__(self, device: Optional[DeviceController] = None,
+                 ocr_engine: Optional[OcrEngine] = None,
+                 image_matcher: Optional[ImageMatcher] = None,
                  device_uri: Optional[str] = None):
         """
         :param device: 自定义设备控制器（注入用）
         :param ocr_engine: 自定义 OCR 引擎（注入用）
+        :param image_matcher: 自定义图片匹配引擎（注入用）
         :param device_uri: Airtest 设备 URI，例如 "Android:///" 自动检测、
                           "Android://localhost:9999" 远程 ADB、
                           "Android://127.0.0.1:5037/<serialno>" 指定序列号。
@@ -277,6 +517,7 @@ class OcrWatcher:
         # 使用默认实现
         self._device = device if device is not None else AirtestDevice()
         self._ocr = ocr_engine if ocr_engine is not None else AirtestOcrEngine()
+        self._image_matcher = image_matcher if image_matcher is not None else AirtestImageMatcher()
         self._watchers: List[Dict] = []
         self._lock = threading.Lock()
 
@@ -298,8 +539,15 @@ class OcrWatcher:
         self.logger.addHandler(handler)
 
     def when(self, text: str) -> TextWatcher:
-        """入口方法：创建新的监控规则"""
+        """入口方法：创建新的文本监控规则"""
         return TextWatcher(self, text)
+
+    def when_image(self, template: Union[str, Template]) -> ImageWatcher:
+        """入口方法：创建新的图片监控规则（语义：当图片出现，干啥）
+
+        :param template: 模板图片路径 或 airtest.Template 实例
+        """
+        return ImageWatcher(self, template)
 
     def connect(self, device_uri: str):
         """
@@ -358,7 +606,7 @@ class OcrWatcher:
             self._stop_event.wait(sleep_time)
 
     def _check_once(self):
-        """单次检测流程：截图 -> OCR -> 匹配 -> 执行"""
+        """单次检测流程：截图 -> (OCR + 图片匹配) -> 匹配 -> 执行"""
         # 1. 获取截图
         img_bytes = self._device.screenshot()
         if not img_bytes:
@@ -370,15 +618,34 @@ class OcrWatcher:
             self.logger.info("Device reconnected, resuming watch loop.")
             self._device_available = True
 
-        # 2. OCR 识别
-        ocr_results = self._ocr.recognize(img_bytes)
-
-        # 3. 遍历所有规则进行匹配
+        # 2. 拉取规则快照，分组以减少重复 OCR / match 调用
         with self._lock:
             watchers = self._watchers.copy()
 
+        if not watchers:
+            return
+
+        has_text = any(r.get("type") == "text" for r in watchers)
+        has_image = any(r.get("type") == "image" for r in watchers)
+
+        # 3. 按需执行 OCR / 图片匹配（同一份截图多规则共享）
+        ocr_results: List[OcrResult] = []
+        if has_text:
+            try:
+                ocr_results = self._ocr.recognize(img_bytes)
+            except Exception as e:
+                self.logger.error(f"OCR recognize error: {e}", exc_info=True)
+
+        # 4. 遍历所有规则进行匹配
         for rule in watchers:
-            matched = self._match_rule(rule, ocr_results)
+            rule_type = rule.get("type", "text")
+            if rule_type == "text":
+                matched = self._match_text_rule(rule, ocr_results)
+            elif rule_type == "image":
+                matched = self._match_image_rule(rule, img_bytes)
+            else:
+                continue
+
             if matched:
                 # 检查冷却时间
                 current_time = time.time()
@@ -392,8 +659,8 @@ class OcrWatcher:
                 except Exception as e:
                     self.logger.error(f"Callback error: {e}", exc_info=True)
 
-    def _match_rule(self, rule: Dict, ocr_results: List[OcrResult]) -> Optional[OcrResult]:
-        """匹配单个规则"""
+    def _match_text_rule(self, rule: Dict, ocr_results: List[OcrResult]) -> Optional[OcrResult]:
+        """匹配单个文本规则"""
         keywords = rule["keywords"]
         mode = rule["mode"]
         region = rule["region"]
@@ -413,6 +680,24 @@ class OcrWatcher:
             for kw in keywords:
                 if self._text_match(text, kw, mode):
                     return res
+        return None
+
+    def _match_image_rule(self, rule: Dict, img_bytes: bytes) -> Optional[ImageMatchResult]:
+        """匹配单个图片规则：依次尝试每个模板，命中即返回"""
+        templates = rule.get("templates") or []
+        if not templates:
+            return None
+        threshold = rule.get("threshold")
+        region = rule.get("region")
+
+        for tpl in templates:
+            try:
+                hit = self._image_matcher.match(img_bytes, tpl, threshold=threshold, region=region)
+            except Exception as e:
+                self.logger.error(f"Image match error for {tpl}: {e}", exc_info=True)
+                continue
+            if hit:
+                return hit
         return None
 
     def _text_match(self, text: str, keyword: str, mode: str) -> bool:
@@ -442,11 +727,18 @@ class OcrWatcher:
             self._watchers.clear()
 
     def set_confidence_threshold(self, threshold: float):
-        """设置全局置信度阈值"""
+        """设置全局 OCR 置信度阈值"""
         if hasattr(self._ocr, 'set_confidence_threshold'):
             self._ocr.set_confidence_threshold(threshold)
         else:
             self.logger.warning("OCR engine does not support set_confidence_threshold")
+
+    def set_image_threshold(self, threshold: float):
+        """设置全局图片模板匹配阈值（ImageMatcher 默认值）"""
+        if hasattr(self._image_matcher, 'set_threshold'):
+            self._image_matcher.set_threshold(threshold)
+        else:
+            self.logger.warning("Image matcher does not support set_threshold")
 
 
 # 创建全局实例
@@ -481,6 +773,23 @@ if __name__ == "__main__":
         .region(100, 100, 800, 600)     # 只监控屏幕上半部分
         .call(lambda res, dev: print(f"发现更新弹窗位置: {res.bbox}"))
     )
+
+    # ========== 图片监控：当图片出现，干啥 ==========
+    # 语义：当模板图片出现，执行 click / dismiss / 自定义回调
+    # 路径方式（自动用全局 threshold / rgb）
+    watcher.when_image("tpl_skip_ad.png").click()
+
+    # 模板对象方式（推荐用于跨分辨率场景，可指定 record_pos / resolution）
+    from airtest.core.api import Template as _Tpl
+    watcher.when_image(
+        _Tpl("tpl_login_btn.png", threshold=0.8, record_pos=(0.5, 0.9),
+             resolution=(1080, 1920))
+    ).region(0, 1500, 1080, 1920).cooldown(10).click()
+
+    # 多模板（或关系）+ 自定义回调
+    def _on_found(img_res, dev):
+        print(f"hit {img_res.template_path} conf={img_res.confidence:.3f}")
+    watcher.when_image("a.png").when_image("b.png").call(_on_found)
 
     # 启动监控（每1秒截图一次）
     watcher.start(interval=1.0)
