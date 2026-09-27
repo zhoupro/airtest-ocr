@@ -33,11 +33,38 @@ try:
 except ImportError:  # 允许直接运行本文件
     from paddleocr_compat import create_paddleocr, parse_paddleocr_result, run_paddleocr
 
+try:
+    from .ocr_watcher import AirtestImageMatcher, ImageMatchResult
+except ImportError:  # 允许直接运行本文件
+    from ocr_watcher import AirtestImageMatcher, ImageMatchResult
+
 
 # 延迟导入PaddleOCR（兼容 2.x / 3.x）
 def init_paddleocr(lang='ch', use_gpu=False):
     """延迟初始化PaddleOCR"""
     return create_paddleocr(lang=lang, use_gpu=use_gpu)
+
+
+# 方向常量
+DIRECTION_ALL = "all"
+DIRECTION_UP = "up"
+DIRECTION_DOWN = "down"
+DIRECTION_LEFT = "left"
+DIRECTION_RIGHT = "right"
+VALID_DIRECTIONS = {DIRECTION_ALL, DIRECTION_UP, DIRECTION_DOWN, DIRECTION_LEFT, DIRECTION_RIGHT}
+
+
+def _classify_relative_direction(from_pos, to_pos):
+    """根据两点坐标返回文本相对图片的实际方向"""
+    fx, fy = from_pos
+    tx, ty = to_pos
+    dx = tx - fx
+    dy = ty - fy
+    if dx == 0 and dy == 0:
+        return "overlap"
+    if abs(dx) >= abs(dy):
+        return DIRECTION_RIGHT if dx > 0 else DIRECTION_LEFT
+    return DIRECTION_DOWN if dy > 0 else DIRECTION_UP
 
 
 class OCRUtils:
@@ -549,6 +576,188 @@ class OCRUtils:
         results = self.ocr_recognize(region=region)
         return [result['text'] for result in results if result['confidence'] >= confidence]
 
+    def _match_image_in_screenshot(self, screenshot_path: str, template,
+                                  image_threshold: float = 0.7,
+                                  rgb: bool = False) -> Optional['ImageMatchResult']:
+        """
+        在已有截图文件中查找模板图片位置
+
+        Args:
+            screenshot_path: 截图文件路径
+            template: 模板图片路径 或 airtest.Template
+            image_threshold: 图片匹配阈值
+            rgb: 是否使用 RGB 通道匹配
+
+        Returns:
+            ImageMatchResult 或 None
+        """
+        with open(screenshot_path, "rb") as f:
+            img_bytes = f.read()
+        matcher = AirtestImageMatcher(threshold=image_threshold, rgb=rgb)
+        return matcher.match(img_bytes, template, threshold=image_threshold)
+
+    def ocr_find_nearest_text_to_image(self, template,
+                                       direction: str = DIRECTION_ALL,
+                                       confidence: float = None,
+                                       image_threshold: float = 0.7,
+                                       region: Tuple[int, int, int, int] = None,
+                                       screenshot_path: str = None,
+                                       rgb: bool = False) -> Optional[Dict]:
+        """
+        在屏幕（或指定截图）中查找模板图片，以图片中心为圆心，
+        找最近的 OCR 识别到的文字，可指定上下左右方向。
+
+        Args:
+            template: 模板图片路径 或 airtest.Template
+            direction: 方向过滤，取值：
+                - 'all'    全部方向（默认）
+                - 'up'     仅考虑图片上方的文字
+                - 'down'   仅考虑图片下方的文字
+                - 'left'   仅考虑图片左侧的文字
+                - 'right'  仅考虑图片右侧的文字
+            confidence: OCR 置信度阈值，None 时使用全局配置
+            image_threshold: 图片模板匹配阈值
+            region: 截图区域 (x1, y1, x2, y2)，None 则截取全屏
+            screenshot_path: 已有的截图文件路径，None 则实时截屏
+            rgb: 图片匹配是否使用 RGB 通道
+
+        Returns:
+            dict 包含以下字段，未找到返回 None：
+                {
+                    'image_match': ImageMatchResult,   # 图片匹配结果
+                    'text': {                          # 最近文字
+                        'text': str,
+                        'confidence': float,
+                        'center': (x, y),
+                        'bbox': (x1, y1, x2, y2),
+                        'points': [...],
+                    },
+                    'distance': float,                 # 欧式距离
+                    'direction': str,                  # 实际方向: up/down/left/right/overlap
+                    'candidates': int,                 # 同方向候选数量
+                }
+        """
+        if direction not in VALID_DIRECTIONS:
+            raise ValueError(
+                f"invalid direction: {direction!r}, "
+                f"expected one of {sorted(VALID_DIRECTIONS)}"
+            )
+        if confidence is None:
+            confidence = self.confidence_threshold
+
+        # 1) 准备截图
+        if screenshot_path is None:
+            if region:
+                x1, y1, x2, y2 = region
+                ImageGrab.grab(bbox=(x1, y1, x2, y2)).save("temp_screenshot.png")
+            else:
+                snapshot(filename="temp_screenshot.png")
+            screenshot_path = "temp_screenshot.png"
+
+        # 2) 在截图中定位模板图片
+        image_match = self._match_image_in_screenshot(
+            screenshot_path, template,
+            image_threshold=image_threshold, rgb=rgb,
+        )
+        if image_match is None:
+            return None
+
+        img_cx, img_cy = image_match.center
+
+        # 3) 在同一张截图上跑 OCR（注意 region 偏移）
+        ocr_region = None
+        if region is None:
+            try:
+                ocr_region = self._infer_region_from_screenshot(screenshot_path)
+            except Exception:
+                ocr_region = None
+
+        results = self.ocr_recognize(image_path=screenshot_path, region=ocr_region)
+
+        # 4) 过滤 + 按方向筛选文字，计算欧式距离
+        candidates = []
+        for r in results:
+            if r['confidence'] < confidence:
+                continue
+            tx, ty = r['center']
+            if direction == DIRECTION_UP and not (ty < img_cy):
+                continue
+            if direction == DIRECTION_DOWN and not (ty > img_cy):
+                continue
+            if direction == DIRECTION_LEFT and not (tx < img_cx):
+                continue
+            if direction == DIRECTION_RIGHT and not (tx > img_cx):
+                continue
+
+            dx = tx - img_cx
+            dy = ty - img_cy
+            dist = (dx * dx + dy * dy) ** 0.5
+            candidates.append((dist, r))
+
+        if not candidates:
+            return {
+                'image_match': image_match,
+                'text': None,
+                'distance': None,
+                'direction': direction,
+                'candidates': 0,
+            }
+
+        candidates.sort(key=lambda item: item[0])
+        best_dist, best_result = candidates[0]
+
+        return {
+            'image_match': image_match,
+            'text': best_result,
+            'distance': best_dist,
+            'direction': _classify_relative_direction(
+                (img_cx, img_cy), best_result['center']
+            ),
+            'candidates': len(candidates),
+        }
+
+    def ocr_touch_nearest_text_to_image(self, template,
+                                        direction: str = DIRECTION_ALL,
+                                        confidence: float = None,
+                                        image_threshold: float = 0.7,
+                                        offset_x: int = 0, offset_y: int = 0,
+                                        timeout: int = 10,
+                                        region: Tuple[int, int, int, int] = None,
+                                        rgb: bool = False) -> bool:
+        """
+        组合操作：定位模板图片 → 找到最近的文字 → 点击该文字。
+        其余参数同 ocr_find_nearest_text_to_image / ocr_touch。
+        """
+        if confidence is None:
+            confidence = self.confidence_threshold
+
+        start = time.time()
+        while time.time() - start < timeout:
+            res = self.ocr_find_nearest_text_to_image(
+                template=template,
+                direction=direction,
+                confidence=confidence,
+                image_threshold=image_threshold,
+                region=region,
+                rgb=rgb,
+            )
+            if res and res.get('text'):
+                tx, ty = res['text']['center']
+                touch((tx + offset_x, ty + offset_y))
+                return True
+            time.sleep(1)
+        return False
+
+    @staticmethod
+    def _infer_region_from_screenshot(screenshot_path: str) -> Optional[Tuple[int, int, int, int]]:
+        """根据截图尺寸推断 (x1, y1, x2, y2) 全图区域，供 ocr_recognize 使用"""
+        try:
+            with Image.open(screenshot_path) as img:
+                w, h = img.size
+            return (0, 0, w, h)
+        except Exception:
+            return None
+
 
 # 创建全局实例
 ocr_utils = OCRUtils()
@@ -581,6 +790,26 @@ def ocr_wait_text(text: str, **kwargs):
 def ocr_get_all_texts(**kwargs):
     """便捷获取所有文字函数"""
     return ocr_utils.ocr_get_all_texts(**kwargs)
+
+def ocr_find_nearest_text_to_image(template, direction: str = DIRECTION_ALL, **kwargs):
+    """
+    便捷函数：定位模板图片，按指定方向找最近的文字。
+
+    示例：
+        # 找图片右侧最近的文字
+        res = ocr_find_nearest_text_to_image("btn.png", direction="right")
+        # 不指定方向则所有方向中最接近的
+        res = ocr_find_nearest_text_to_image("btn.png")
+    """
+    return ocr_utils.ocr_find_nearest_text_to_image(
+        template=template, direction=direction, **kwargs
+    )
+
+def ocr_touch_nearest_text_to_image(template, direction: str = DIRECTION_ALL, **kwargs):
+    """便捷函数：定位模板图片后，按方向点击最近的文字"""
+    return ocr_utils.ocr_touch_nearest_text_to_image(
+        template=template, direction=direction, **kwargs
+    )
 
 
 if __name__ == "__main__":

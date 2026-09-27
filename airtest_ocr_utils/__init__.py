@@ -17,8 +17,9 @@ os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 # 现在安全地导入OCR工具
-from .ocr_utils import OCRUtils, ocr_double_click, ocr_find_text_with_offset, ocr_get_all_texts, ocr_swipe, ocr_touch, \
-    ocr_touch_multiple, ocr_utils, ocr_wait_text
+from .ocr_utils import OCRUtils, ocr_double_click, ocr_find_nearest_text_to_image, ocr_find_text_with_offset, \
+    ocr_get_all_texts, ocr_swipe, ocr_touch, ocr_touch_multiple, ocr_touch_nearest_text_to_image, \
+    ocr_utils, ocr_wait_text
 
 # 导入OCR Watcher（后台监控器）
 try:
@@ -39,6 +40,8 @@ __all__ = [
     "ocr_find_text_with_offset",
     "ocr_wait_text",
     "ocr_get_all_texts",
+    "ocr_find_nearest_text_to_image",
+    "ocr_touch_nearest_text_to_image",
 ]
 
 # 如果Watcher可用，添加到导出列表

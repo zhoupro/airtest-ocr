@@ -23,6 +23,8 @@
 - `ocr_find_text_with_offset(text, offset_x, offset_y, **kwargs)`: 偏移量点击
 - `ocr_wait_text(text, **kwargs)`: 等待文字出现
 - `ocr_get_all_texts(**kwargs)`: 获取所有识别文字
+- `ocr_find_nearest_text_to_image(template, direction='all', **kwargs)`: 定位模板图片，按方向找最近的文字
+- `ocr_touch_nearest_text_to_image(template, direction='all', **kwargs)`: 定位模板图片 + 点击方向上最近的文字
 
 #### 配置方法
 - `set_confidence_threshold(threshold)`: 设置置信度阈值
@@ -115,6 +117,57 @@ ocr_touch_multiple(["选项A", "选项B"], strategy='nearest', target_pos=(500, 
 
 # 第一个匹配策略
 ocr_touch_multiple(["确定", "取消"], strategy='first')
+```
+
+## 图片定位 + 方向找最近文字
+
+`ocr_find_nearest_text_to_image` 组合了图片模板匹配与 OCR：
+
+1. 在当前屏幕（或指定截图）中找到模板图片位置
+2. 以图片中心为圆心，在 OCR 识别到的文字里按方向过滤
+3. 返回距离最近的文字（欧式距离），方向不指定则取所有方向中最近的
+
+参数：
+
+| 参数 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `template` | `str` 或 `airtest.Template` | 模板图片路径 |
+| `direction` | `str` | `'all'` / `'up'` / `'down'` / `'left'` / `'right'` |
+| `confidence` | `float` | OCR 置信度阈值，None 用全局配置 |
+| `image_threshold` | `float` | 图片模板匹配阈值，默认 0.7 |
+| `region` | tuple | 截图区域 `(x1, y1, x2, y2)`，None 全屏 |
+| `screenshot_path` | `str` | 已有截图路径，None 则实时截屏 |
+| `rgb` | `bool` | 图片匹配是否使用 RGB 通道 |
+
+方向过滤采用半平面语义（half-plane）：
+
+- `up`    文字中心 y < 图片中心 y
+- `down`  文字中心 y > 图片中心 y
+- `left`  文字中心 x < 图片中心 x
+- `right` 文字中心 x > 图片中心 x
+- `all`   不限制方向
+
+```python
+from airtest_ocr_utils import ocr_find_nearest_text_to_image, ocr_touch_nearest_text_to_image
+
+# 1) 仅获取最近文字信息（不点击）
+res = ocr_find_nearest_text_to_image("tpl_btn.png", direction="right")
+if res and res["text"]:
+    print("最近文字:", res["text"]["text"], "坐标:", res["text"]["center"])
+    print("方向:", res["direction"], "距离:", res["distance"])
+
+# 2) 一键：找到图片右侧最近文字并点击
+ocr_touch_nearest_text_to_image("tpl_btn.png", direction="right")
+
+# 3) 不指定方向，所有方向中找最近的
+ocr_touch_nearest_text_to_image("tpl_btn.png")
+
+# 4) 限制 OCR 区域 + 提高图片匹配阈值
+ocr_touch_nearest_text_to_image(
+    "tpl_btn.png", direction="down",
+    region=(0, 1000, 1080, 1920),
+    image_threshold=0.8,
+)
 ```
 
 ## 错误处理
