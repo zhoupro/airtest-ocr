@@ -12,7 +12,6 @@ Image Watcher 快速开始示例
 import time
 
 from airtest.core.api import Template
-
 from airtest_ocr_utils import ocr_watcher
 
 DEVICE_URI = "Android:///"

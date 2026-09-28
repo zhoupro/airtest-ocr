@@ -16,9 +16,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-
 from airtest_ocr_utils import ocr_find_nearest_text_to_image
+from PIL import Image, ImageDraw, ImageFont
 
 
 def _make_font(size: int):

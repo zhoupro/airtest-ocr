@@ -562,19 +562,47 @@ class OCRUtils:
     def ocr_get_all_texts(self, confidence: float = None, region: Tuple[int, int, int, int] = None) -> List[str]:
         """
         获取屏幕上所有识别到的文字
-        
+
         Args:
             confidence: 置信度阈值
             region: 截图区域 (x1, y1, x2, y2)，如果为None则截取全屏
-            
+
         Returns:
             文字列表
         """
         if confidence is None:
             confidence = self.confidence_threshold
-            
+
         results = self.ocr_recognize(region=region)
         return [result['text'] for result in results if result['confidence'] >= confidence]
+
+    def ocr_get_matched_texts(self, pattern: str,
+                              match_mode: str = 'exact',
+                              confidence: float = None,
+                              region: Tuple[int, int, int, int] = None) -> List[Dict]:
+        """
+        按指定匹配模式获取屏幕上所有符合条件的文字及其完整信息
+
+        Args:
+            pattern: 匹配目标文本（regex 模式下为正则表达式）
+            match_mode: 匹配模式，支持 'exact' | 'contains' | 'startswith' | 'endswith' | 'regex'
+            confidence: 置信度阈值，默认使用实例阈值
+            region: 截图区域 (x1, y1, x2, y2)，None 则截全屏
+
+        Returns:
+            命中列表，每项为 ocr_recognize 的结果 dict（含 text / position / confidence）
+        """
+        if confidence is None:
+            confidence = self.confidence_threshold
+
+        results = self.ocr_recognize(region=region)
+        matched: List[Dict] = []
+        for result in results:
+            if result['confidence'] < confidence:
+                continue
+            if self._text_match(result['text'], pattern, match_mode):
+                matched.append(result)
+        return matched
 
     def _match_image_in_screenshot(self, screenshot_path: str, template,
                                   image_threshold: float = 0.7,
@@ -790,6 +818,18 @@ def ocr_wait_text(text: str, **kwargs):
 def ocr_get_all_texts(**kwargs):
     """便捷获取所有文字函数"""
     return ocr_utils.ocr_get_all_texts(**kwargs)
+
+def ocr_get_matched_texts(pattern: str, match_mode: str = 'exact', **kwargs) -> List[Dict]:
+    """
+    便捷函数：按匹配模式获取屏幕上所有符合条件的文字（含坐标与置信度）。
+
+    示例：
+        # 正则：所有数字开头的文字
+        ocr_get_matched_texts(r"^\d+", match_mode="regex")
+        # 包含子串
+        ocr_get_matched_texts("订单", match_mode="contains")
+    """
+    return ocr_utils.ocr_get_matched_texts(pattern, match_mode=match_mode, **kwargs)
 
 def ocr_find_nearest_text_to_image(template, direction: str = DIRECTION_ALL, **kwargs):
     """

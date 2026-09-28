@@ -3,8 +3,8 @@
 """
 
 from .ocr_utils import OCRUtils, ocr_double_click, ocr_find_nearest_text_to_image, ocr_find_text_with_offset, \
-    ocr_get_all_texts, ocr_swipe, ocr_touch, ocr_touch_multiple, ocr_touch_nearest_text_to_image, \
-    ocr_utils, ocr_wait_text
+    ocr_get_all_texts, ocr_swipe, ocr_touch, ocr_touch_multiple, ocr_touch_nearest_text_to_image, ocr_utils, \
+    ocr_wait_text
 
 __all__ = [
     "OCRUtils",
