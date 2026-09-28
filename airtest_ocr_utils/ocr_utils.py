@@ -99,10 +99,16 @@ class OCRUtils:
         if image_path is None:
             # 截取屏幕
             if region:
-                # 使用PIL截取指定区域
+                # 先用 airtest 从**设备**截全屏（PIL.ImageGrab.grab 截的是
+                # 宿主机桌面，对 airtest Android 场景无效 —— 设备是通过 adb
+                # 连接的，宿主桌面没有设备画面），再用 PIL crop 到指定区域。
+                # 旧实现直接 ImageGrab.grab(bbox=...) 在桌面镜像未对齐时会
+                # 拿到错误区域，导致 region 看起来没生效（识别到区外文字）。
                 x1, y1, x2, y2 = region
-                screenshot = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-                screenshot.save("temp_screenshot.png")
+                snapshot(filename="temp_screenshot.png")
+                full = Image.open("temp_screenshot.png")
+                cropped = full.crop((x1, y1, x2, y2))
+                cropped.save("temp_screenshot.png")
                 debug_image_path = "temp_screenshot_debug.png"
             else:
                 # 使用Airtest截取全屏
@@ -676,8 +682,13 @@ class OCRUtils:
         # 1) 准备截图
         if screenshot_path is None:
             if region:
+                # 同 ocr_recognize：先从设备截全屏，再 PIL crop 到 region。
+                # 旧实现用 ImageGrab.grab(bbox=...) 截宿主桌面是错的。
                 x1, y1, x2, y2 = region
-                ImageGrab.grab(bbox=(x1, y1, x2, y2)).save("temp_screenshot.png")
+                snapshot(filename="temp_screenshot.png")
+                full = Image.open("temp_screenshot.png")
+                cropped = full.crop((x1, y1, x2, y2))
+                cropped.save("temp_screenshot.png")
             else:
                 snapshot(filename="temp_screenshot.png")
             screenshot_path = "temp_screenshot.png"
@@ -692,13 +703,18 @@ class OCRUtils:
 
         img_cx, img_cy = image_match.center
 
-        # 3) 在同一张截图上跑 OCR（注意 region 偏移）
-        ocr_region = None
+        # 3) 在同一张截图上跑 OCR。
+        # 旧实现这里 region 给 None，导致 ocr_recognize 不做坐标偏移
+        # （crop 后图片小，OCR 返回的是 crop 内坐标而非设备绝对坐标，
+        # 下面 #4 按方向过滤就拿不到正确的 img_cx / tx,ty 比较）。
+        # 修：显式把 region 透传进去，让 ocr_recognize 把坐标加回 (x1, y1)。
         if region is None:
             try:
                 ocr_region = self._infer_region_from_screenshot(screenshot_path)
             except Exception:
                 ocr_region = None
+        else:
+            ocr_region = region
 
         results = self.ocr_recognize(image_path=screenshot_path, region=ocr_region)
 
