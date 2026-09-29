@@ -39,6 +39,26 @@ except ImportError:  # 允许直接运行本文件
     from ocr_watcher import AirtestImageMatcher, ImageMatchResult
 
 
+def _snapshot_saved_path(filename: str) -> str:
+    """还原 snapshot(filename=...) 真正落盘的路径。
+
+    airtest.core.api.snapshot() 对相对 filename 会拼上 ST.LOG_DIR 再保存
+    （airtest/core/api.py: ``logdir = ST.LOG_DIR or "."``），但它 **返回的是
+    try_log_screen() 的返回值**，也就是自动生成的 ``<毫秒时间戳>.jpg`` 裸文件名，
+    既不是我们请求的 temp_screenshot.png，也没有目录部分。
+
+    直接拿这个返回值去 Image.open() / 传给 paddleocr，会按 CWD 解析，实测报
+    ``FileNotFoundError: [Errno 2] No such file or directory: '1790721701219.jpg'``
+    （典型场景：``python controller/wxgift.air/wxgift.py`` 从 autoapp 根目录跑，
+    截图落在 controller/wxgift.air/log/ 而 CWD 是 autoapp/）。
+
+    这里按 snapshot() 自己的拼路径规则还原出真实路径，避开 CWD 与 LOG_DIR 不一致。
+    """
+    if os.path.isabs(filename):
+        return filename
+    return os.path.join(ST.LOG_DIR or ".", filename)
+
+
 # 延迟导入PaddleOCR（兼容 2.x / 3.x）
 def init_paddleocr(lang='ch', use_gpu=False):
     """延迟初始化PaddleOCR"""
@@ -96,6 +116,7 @@ class OCRUtils:
         Returns:
             识别结果列表，每个元素包含文字、坐标和置信度
         """
+        _screenshot_path = None
         if image_path is None:
             # 截取屏幕
             if region:
@@ -106,15 +127,20 @@ class OCRUtils:
                 # 拿到错误区域，导致 region 看起来没生效（识别到区外文字）。
                 x1, y1, x2, y2 = region
                 snapshot(filename="temp_screenshot.png")
-                full = Image.open("temp_screenshot.png")
+                # 不用 snapshot 返回值里的 "screen"：那是 try_log_screen 自动生成
+                # 的 <时间戳>.jpg 裸文件名，不是 temp_screenshot.png。按 snapshot()
+                # 的拼路径规则还原真实落盘路径，避开 CWD 与 ST.LOG_DIR 不一致。
+                _screenshot_path = _snapshot_saved_path("temp_screenshot.png")
+                full = Image.open(_screenshot_path)
                 cropped = full.crop((x1, y1, x2, y2))
-                cropped.save("temp_screenshot.png")
+                cropped.save(_screenshot_path)
                 debug_image_path = "temp_screenshot_debug.png"
             else:
                 # 使用Airtest截取全屏
                 snapshot(filename="temp_screenshot.png")
+                _screenshot_path = _snapshot_saved_path("temp_screenshot.png")
                 debug_image_path = "temp_screenshot_debug.png"
-            image_path = "temp_screenshot.png"
+            image_path = _screenshot_path
         else:
             debug_image_path = image_path.replace('.png', '_debug.png')
             
@@ -128,9 +154,9 @@ class OCRUtils:
             # 读取图片用于调试标注
             if debug:
                 img = cv2.imread(image_path)
-                if img is None:
-                    # 如果是新截图的，重新读取
-                    img = cv2.imread("temp_screenshot.png")
+                if img is None and _screenshot_path:
+                    # image_path 读不到时（新截图刚被覆盖等），回退到真实截图路径
+                    img = cv2.imread(_screenshot_path)
             
             for points, text, confidence in lines:
                 
@@ -686,12 +712,16 @@ class OCRUtils:
                 # 旧实现用 ImageGrab.grab(bbox=...) 截宿主桌面是错的。
                 x1, y1, x2, y2 = region
                 snapshot(filename="temp_screenshot.png")
-                full = Image.open("temp_screenshot.png")
+                # 不用 snapshot 返回值里的 "screen"（那是 try_log_screen 的
+                # <时间戳>.jpg 裸文件名），按 snapshot() 的规则还原真实路径。
+                screenshot_path = _snapshot_saved_path("temp_screenshot.png")
+                full = Image.open(screenshot_path)
                 cropped = full.crop((x1, y1, x2, y2))
-                cropped.save("temp_screenshot.png")
+                cropped.save(screenshot_path)
             else:
                 snapshot(filename="temp_screenshot.png")
-            screenshot_path = "temp_screenshot.png"
+                screenshot_path = _snapshot_saved_path("temp_screenshot.png")
+            screenshot_path = screenshot_path or _snapshot_saved_path("temp_screenshot.png")
 
         # 2) 在截图中定位模板图片
         image_match = self._match_image_in_screenshot(
