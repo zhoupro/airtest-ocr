@@ -92,6 +92,7 @@ ocr_watcher.stop()
 - **冷却时间**: 防止重复触发
 - **置信度阈值**: 过滤低置信度的识别结果
 - **自定义回调**: 灵活的处理逻辑
+- **多条件组合 watch**: 通过 `also_when` / `also_when_image` 链式追加条件，或用 `&` 运算符组合 Builder；所有条件在同一帧内同时满足才触发（`MultiConditionWatcher`）
 
 ## 使用方式
 
@@ -253,11 +254,12 @@ python utils/test_ocr_watcher.py
 ## 版本信息
 
 - **整合日期**: 2025-01-30
-- **版本**: 1.2.0
+- **版本**: 1.3.0
 - **兼容性**: 与原有OCR工具完全兼容
 - **更新内容**:
-  - 将 watch 逻辑收敛到 airtest_ocr_utils 包中
+  - 新增多条件组合 watch（`MultiConditionWatcher`）：`also_when` / `also_when_image` 链式 + `&` 运算符，所有条件同帧满足才触发
   - 新增图片监控（`when_image`）能力，支持模板匹配 / 跨分辨率
+  - 将 watch 逻辑收敛到 airtest_ocr_utils 包中
 
 ## 反馈与改进
 

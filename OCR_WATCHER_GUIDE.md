@@ -328,6 +328,71 @@ ocr_watcher \
     .click()
 ```
 
+### 5. 多条件组合 watch（AND 关系）
+
+当业务需要**多个条件在同一帧截图内同时满足**才触发时（例如：登录页同时出现「登录」按钮和密码框、确认弹窗出现时背景图标也已渲染完），用 `also_when` / `also_when_image` 链式追加，或用 `&` 运算符组合不同 Builder。
+
+**两种写法**:
+
+```python
+from airtest.core.api import Template
+
+# 写法1: 完全链式（推荐）
+ocr_watcher.when("登录") \
+    .also_when("密码") \
+    .also_when_image(Template("dialog.png", threshold=0.8,
+                              record_pos=(0.5, 0.5),
+                              resolution=(1080, 1920))) \
+    .cooldown(15) \
+    .first_click()
+
+# 写法2: & 运算符
+(ocr_watcher.when("确定")
+ & ocr_watcher.when_image(Template("confirm_btn.png",
+                                    threshold=0.85))).first_click()
+```
+
+**回调签名**（`call()` 自定义场景）:
+
+```python
+def on_compound(matches, device):
+    # matches 是按声明顺序排列的命中结果列表
+    # matches[0] 对应第一个条件（文本 → OcrResult，图片 → ImageMatchResult）
+    # matches[1] 对应第二个条件，依此类推
+    text_res = matches[0]    # OcrResult
+    image_res = matches[1]   # ImageMatchResult
+    print(f"text={text_res.text} @ {text_res.center}")
+    print(f"image conf={image_res.confidence} @ {image_res.center}")
+
+ocr_watcher.when("登录") \
+    .also_when_image(Template("btn.png")) \
+    .call(on_compound)
+```
+
+**内置动作**:
+
+| 方法 | 行为 |
+|------|------|
+| `.first_click()` | 只点击 `matches[0]` 的中心点（多条件时取第一个） |
+| `.dismiss()` | 按一次返回键 |
+| `.cooldown(s)` | 整组规则的冷却时间（任一条件失败都重新计时） |
+
+**与单条件 API 的区别**:
+
+| 维度 | `when("x").click()` | `when("x").also_when("y").first_click()` |
+|------|---------------------|------------------------------------------|
+| 触发时机 | 任一关键字出现 | 所有条件同一帧都满足 |
+| 回调签名 | `(OcrResult, device)` | `(List[OcrResult\|ImageMatchResult], device)` |
+| 内置点击 | 点击命中文字 | 只点击 matches[0] |
+| 典型场景 | 「允许」「同意」「跳过」任一弹窗 | 登录页：同时有「登录」+「密码」+ 按钮图 |
+
+**重要限制**:
+
+- `.also_when_image()` **只接收 `airtest.Template` 实例**（不允许字符串路径），便于在链式中显式配置 `threshold` / `record_pos` / `resolution` 等参数；如需字符串路径，请用 `watcher.when_image("path.png")` 单条件入口
+- `&` 两侧必须是同一 `OcrWatcher` 实例下的 Builder
+- 多条件规则的冷却时间是整组共享，不是每个子条件单独计
+- `region()` / `confidence()` / `threshold()` 在每个子条件 Builder 上独立设置（链式调用时归属上一个 Builder）
+
 ## API 参考
 
 ### OcrWatcher
@@ -354,6 +419,9 @@ ocr_watcher \
 | `click()` | - | 点击文字中心 |
 | `dismiss()` | - | 按返回键 |
 | `call(callback)` | `callback: Callable` | 自定义回调 |
+| `also_when(text)` | `text: str` | 链式追加文本条件（AND），返回 `MultiConditionWatcher` |
+| `also_when_image(template)` | `template: Template` | 链式追加图片条件（AND），返回 `MultiConditionWatcher`；**仅接受 Template** |
+| `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符，等价于 also 组合 |
 
 ### ImageWatcher（语义：当图片出现，干啥）
 
@@ -366,6 +434,21 @@ ocr_watcher \
 | `click()` | - | 点击命中图片中心 |
 | `dismiss()` | - | 按返回键 |
 | `call(callback)` | `callback: Callable[[ImageMatchResult, DeviceController], None]` | 自定义回调 |
+| `also_when(text)` | `text: str` | 链式追加文本条件（AND），返回 `MultiConditionWatcher` |
+| `also_when_image(template)` | `template: Template` | 链式追加图片条件（AND），返回 `MultiConditionWatcher`；**仅接受 Template** |
+| `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符，等价于 also 组合 |
+
+### MultiConditionWatcher（多条件 AND 组合）
+
+| 方法 | 参数 | 说明 |
+|------|------|------|
+| `also_when(text)` | `text: str` | 继续追加文本条件（AND） |
+| `also_when_image(template)` | `template: Template` | 继续追加图片条件（AND）；**仅接受 Template** |
+| `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符 |
+| `cooldown(seconds)` | `seconds: float` | 整组规则的冷却时间 |
+| `first_click()` | - | 点击 `matches[0]` 的中心点（多条件时只点第一个） |
+| `dismiss()` | - | 按返回键 |
+| `call(callback)` | `callback: Callable[[List[OcrResult\|ImageMatchResult], DeviceController], None]` | 自定义回调，`matches[i]` 对应第 i 个条件 |
 
 `ImageMatchResult` 字段：
 - `template_path`: 模板文件路径
@@ -426,6 +509,13 @@ ocr_watcher.when("广告").cooldown(30).click()
 ```
 
 ## 更新日志
+
+### v1.3.0 (2025-xx-xx)
+- **新增多条件组合 watch**：`MultiConditionWatcher` + 链式 `also_when` / `also_when_image` + `&` 运算符
+- 所有子条件在同一帧截图内**同时满足**才触发回调
+- 内置 `first_click()` 只点 `matches[0]`；`call()` 回调收到 `List[OcrResult|ImageMatchResult]`
+- `.also_when_image()` 收紧为只接受 `airtest.Template`（强制显式 threshold / record_pos 等参数）
+- 新增单元测试 `test_compound_watcher.py`（13 个用例，覆盖命中/部分命中/拒绝 str/冷却/链式 click 等）
 
 ### v1.2.0 (2025-xx-xx)
 - **新增图片监控能力**：`when_image()` + `ImageWatcher`，语义"当图片出现，干啥"

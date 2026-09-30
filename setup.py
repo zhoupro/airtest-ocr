@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="airtest-ocr-utils",
-    version="1.0.1",
+    version="1.3.0",
     description="基于Airtest和PaddleOCR的自动化工具封装",
     author="fan",
     packages=find_packages(),
