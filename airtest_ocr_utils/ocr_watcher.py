@@ -47,6 +47,16 @@ class ImageMatchResult:
     points: List[Tuple[int, int]]             # 四个角点坐标
 
 
+def _require_template(template) -> None:
+    """校验入参必须是 airtest.Template 实例（also_when_image 系列使用）。"""
+    if not isinstance(template, Template):
+        raise TypeError(
+            "also_when_image() requires an airtest.Template instance, "
+            f"got {type(template).__name__}. "
+            "For plain file paths, use watcher.when_image('path.png') instead."
+        )
+
+
 class OcrEngine(ABC):
     """OCR引擎抽象基类"""
     @abstractmethod
@@ -345,6 +355,9 @@ class TextWatcher:
     """
     规则构建器，链式 API 设计：
     watcher.when("允许").when("确定").click()
+
+    支持链式追加条件形成 AND 组合:
+        watcher.when("登录").also_when_image("dialog.png").click()
     """
     def __init__(self, parent: "OcrWatcher", text: str = ""):
         self._parent = parent
@@ -387,21 +400,70 @@ class TextWatcher:
         self._cooldown = seconds
         return self
 
-    def call(self, callback: Callable[[OcrResult, DeviceController], None]):
-        """
-        注册自定义回调
-        callback: function(ocr_result, device)
-        """
-        rule = {
+    def _to_condition_dict(self) -> Dict:
+        """生成可复用的条件字典（不含 callback/cooldown/last_triggered）"""
+        return {
             "type": "text",
             "keywords": self._keywords.copy(),
             "mode": self._match_mode,
             "region": self._region,
             "confidence": self._confidence,
+        }
+
+    def __and__(self, other: Union["TextWatcher", "ImageWatcher", "MultiConditionWatcher"]
+                ) -> "MultiConditionWatcher":
+        """组合运算符：与另一个 Watcher 组合，所有条件同时满足才触发。"""
+        if not isinstance(other, (TextWatcher, ImageWatcher, MultiConditionWatcher)):
+            return NotImplemented
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            other._to_condition_dict(),
+        ])
+
+    def also_when(self, text: str) -> "MultiConditionWatcher":
+        """链式追加文本条件，返回 MultiConditionWatcher（AND 关系）。
+
+        用法::
+
+            watcher.when("登录").also_when("密码").click()
+        """
+        cond = TextWatcher(self._parent, text)._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
+    def also_when_image(self, template: Template) -> "MultiConditionWatcher":
+        """链式追加图片条件，返回 MultiConditionWatcher（AND 关系）。
+
+        仅接收 ``airtest.Template`` 实例，便于配置 threshold / record_pos /
+        resolution / rgb 等参数。如需使用字符串路径，请改用 ``watcher.when_image("path.png")``。
+
+        用法::
+
+            from airtest.core.api import Template
+            watcher.when("登录") \\
+                .also_when_image(Template("dialog.png", threshold=0.85)) \\
+                .first_click()
+        """
+        _require_template(template)
+        cond = ImageWatcher(self._parent, template)._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
+    def call(self, callback: Callable[[OcrResult, DeviceController], None]):
+        """
+        注册自定义回调
+        callback: function(ocr_result, device)
+        """
+        rule = self._to_condition_dict()
+        rule.update({
             "callback": callback,
             "cooldown": self._cooldown,
             "last_triggered": self._last_triggered,
-        }
+        })
         self._parent._watchers.append(rule)
         return self
 
@@ -425,6 +487,9 @@ class ImageWatcher:
         watcher.when_image(Template("tpl_btn.png", threshold=0.8)).click()
 
     语义：当图片出现，干啥（click / dismiss / 自定义 call）。
+
+    支持链式追加条件形成 AND 组合:
+        watcher.when_image("dialog.png").also_when("登录").click()
     """
     def __init__(self, parent: "OcrWatcher", template: Union[str, Template, None] = None):
         self._parent = parent
@@ -456,20 +521,57 @@ class ImageWatcher:
         self._cooldown = seconds
         return self
 
+    def _to_condition_dict(self) -> Dict:
+        """生成可复用的条件字典（不含 callback/cooldown/last_triggered）"""
+        return {
+            "type": "image",
+            "templates": self._templates.copy(),
+            "threshold": self._threshold,
+            "region": self._region,
+        }
+
+    def __and__(self, other: Union["TextWatcher", "ImageWatcher", "MultiConditionWatcher"]
+                ) -> "MultiConditionWatcher":
+        """组合运算符：与另一个 Watcher 组合，所有条件同时满足才触发。"""
+        if not isinstance(other, (TextWatcher, ImageWatcher, MultiConditionWatcher)):
+            return NotImplemented
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            other._to_condition_dict(),
+        ])
+
+    def also_when(self, text: str) -> "MultiConditionWatcher":
+        """链式追加文本条件，返回 MultiConditionWatcher（AND 关系）。"""
+        cond = TextWatcher(self._parent, text)._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
+    def also_when_image(self, template: Template) -> "MultiConditionWatcher":
+        """链式追加图片条件，返回 MultiConditionWatcher（AND 关系）。
+
+        仅接收 ``airtest.Template`` 实例，便于配置 threshold / record_pos /
+        resolution / rgb 等参数。如需使用字符串路径，请改用 ``watcher.when_image("path.png")``。
+        """
+        _require_template(template)
+        cond = ImageWatcher(self._parent, template)._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
     def call(self, callback: Callable[[ImageMatchResult, DeviceController], None]):
         """
         注册自定义回调
         callback: function(image_match_result, device)
         """
-        rule = {
-            "type": "image",
-            "templates": self._templates.copy(),
-            "threshold": self._threshold,
-            "region": self._region,
+        rule = self._to_condition_dict()
+        rule.update({
             "callback": callback,
             "cooldown": self._cooldown,
             "last_triggered": self._last_triggered,
-        }
+        })
         self._parent._watchers.append(rule)
         return self
 
@@ -487,6 +589,113 @@ class ImageWatcher:
     def dismiss(self):
         """内置回调：按返回键（常用于关闭弹窗）"""
         return self.call(lambda res, dev: dev.press_back())
+
+
+class MultiConditionWatcher:
+    """
+    多条件组合 Watcher：同一帧截图内**所有条件同时满足**才触发回调。
+
+    用法:
+
+    .. code-block:: python
+
+        # 方式1: 完全链式（推荐，also_when / also_when_image）
+        ocr_watcher.when("登录") \\
+            .also_when_image("dialog.png") \\
+            .also_when("密码") \\
+            .cooldown(10) \\
+            .first_click()
+
+        # 方式2: & 运算符
+        (ocr_watcher.when("登录")
+         & ocr_watcher.when_image("dialog.png")).first_click()
+
+    回调签名:
+
+    .. code-block:: python
+
+        def callback(matches: List[Union[OcrResult, ImageMatchResult]],
+                     device: DeviceController):
+            # matches[i] 是第 i 个条件的命中结果（按声明顺序）
+            text_match = matches[0]
+            image_match = matches[1]
+            ...
+    """
+    def __init__(self, parent: "OcrWatcher", conditions: List[Dict]):
+        self._parent = parent
+        self._conditions = conditions
+        self._cooldown = 0
+        self._last_triggered = 0
+
+    def __and__(self, other: Union["TextWatcher", "ImageWatcher", "MultiConditionWatcher"]
+                ) -> "MultiConditionWatcher":
+        """继续组合更多条件。"""
+        if not isinstance(other, (TextWatcher, ImageWatcher, MultiConditionWatcher)):
+            return NotImplemented
+        return MultiConditionWatcher(self._parent, self._conditions + [other._to_condition_dict()])
+
+    def also_when(self, text: str) -> "MultiConditionWatcher":
+        """链式追加文本条件。"""
+        cond = TextWatcher(self._parent, text)._to_condition_dict()
+        self._conditions.append(cond)
+        return self
+
+    def also_when_image(self, template: Template) -> "MultiConditionWatcher":
+        """链式追加图片条件（仅接收 airtest.Template 实例）。"""
+        _require_template(template)
+        cond = ImageWatcher(self._parent, template)._to_condition_dict()
+        self._conditions.append(cond)
+        return self
+
+    def cooldown(self, seconds: float) -> "MultiConditionWatcher":
+        """设置冷却时间，防止重复触发（作用于整个组合规则）。"""
+        self._cooldown = seconds
+        return self
+
+    @staticmethod
+    def _clone_condition(c: Dict) -> Dict:
+        """克隆条件字典，避免外部 builder 修改影响已注册的规则。"""
+        out = dict(c)
+        if "keywords" in out:
+            out["keywords"] = out["keywords"].copy()
+        if "templates" in out:
+            out["templates"] = out["templates"].copy()
+        return out
+
+    def call(self, callback: Callable[[List[Union[OcrResult, ImageMatchResult]], DeviceController], None]
+             ) -> "MultiConditionWatcher":
+        """注册自定义回调。
+
+        callback 签名: ``callback(matches, device)``
+        - ``matches``: 按声明顺序排列的命中结果列表（任一元素为 OcrResult 或 ImageMatchResult）
+        - ``device``: 设备控制器
+        """
+        rule = {
+            "type": "compound",
+            "conditions": [self._clone_condition(c) for c in self._conditions],
+            "callback": callback,
+            "cooldown": self._cooldown,
+            "last_triggered": self._last_triggered,
+        }
+        self._parent._watchers.append(rule)
+        return self
+
+    def first_click(self) -> "MultiConditionWatcher":
+        """内置回调：仅点击第一个命中位置的中心点（多条件满足时取 matches[0]）。"""
+        def _handler(matches: List[Union[OcrResult, ImageMatchResult]], device: DeviceController):
+            if not matches:
+                return
+            m = matches[0]
+            x, y = m.center
+            device.click(int(x), int(y))
+            self._parent.logger.info(
+                f"Compound first_click -> {type(m).__name__} at ({int(x)}, {int(y)})"
+            )
+        return self.call(_handler)
+
+    def dismiss(self) -> "MultiConditionWatcher":
+        """内置回调：按一次返回键（关闭弹窗）。"""
+        return self.call(lambda matches, dev: dev.press_back())
 
 
 class OcrWatcher:
@@ -625,8 +834,9 @@ class OcrWatcher:
         if not watchers:
             return
 
-        has_text = any(r.get("type") == "text" for r in watchers)
-        has_image = any(r.get("type") == "image" for r in watchers)
+        # 检测是否需要 OCR / 图片匹配（含 compound 规则中的子条件）
+        has_text = any(self._rule_needs_text(r) for r in watchers)
+        has_image = any(self._rule_needs_image(r) for r in watchers)
 
         # 3. 按需执行 OCR / 图片匹配（同一份截图多规则共享）
         ocr_results: List[OcrResult] = []
@@ -643,6 +853,8 @@ class OcrWatcher:
                 matched = self._match_text_rule(rule, ocr_results)
             elif rule_type == "image":
                 matched = self._match_image_rule(rule, img_bytes)
+            elif rule_type == "compound":
+                matched = self._match_compound_rule(rule, ocr_results, img_bytes)
             else:
                 continue
 
@@ -699,6 +911,47 @@ class OcrWatcher:
             if hit:
                 return hit
         return None
+
+    @staticmethod
+    def _rule_needs_text(rule: Dict) -> bool:
+        """判断该规则是否需要 OCR 识别"""
+        if rule.get("type") == "text":
+            return True
+        if rule.get("type") == "compound":
+            return any(c.get("type") == "text" for c in rule.get("conditions", []))
+        return False
+
+    @staticmethod
+    def _rule_needs_image(rule: Dict) -> bool:
+        """判断该规则是否需要图片模板匹配"""
+        if rule.get("type") == "image":
+            return True
+        if rule.get("type") == "compound":
+            return any(c.get("type") == "image" for c in rule.get("conditions", []))
+        return False
+
+    def _match_compound_rule(self, rule: Dict, ocr_results: List[OcrResult], img_bytes: bytes
+                             ) -> Optional[List[Union[OcrResult, ImageMatchResult]]]:
+        """匹配组合规则：所有子条件都必须命中，否则返回 None。
+
+        :return: 所有条件按声明顺序排列的命中结果列表；任一条件未命中则返回 None
+        """
+        conditions = rule.get("conditions") or []
+        if not conditions:
+            return None
+        matches: List[Union[OcrResult, ImageMatchResult]] = []
+        for cond in conditions:
+            ctype = cond.get("type")
+            if ctype == "text":
+                m = self._match_text_rule(cond, ocr_results)
+            elif ctype == "image":
+                m = self._match_image_rule(cond, img_bytes)
+            else:
+                return None
+            if m is None:
+                return None
+            matches.append(m)
+        return matches
 
     def _text_match(self, text: str, keyword: str, mode: str) -> bool:
         """文字匹配逻辑"""
@@ -790,6 +1043,21 @@ if __name__ == "__main__":
     def _on_found(img_res, dev):
         print(f"hit {img_res.template_path} conf={img_res.confidence:.3f}")
     watcher.when_image("a.png").when_image("b.png").call(_on_found)
+
+    # ========== 多条件 watch：所有条件同时满足才触发 ==========
+    # 完全链式 API（also_when_image 仅接收 airtest.Template）
+    (watcher
+        .when("登录")                                     # 文本条件 1
+        .also_when("密码")                                # 文本条件 2 (AND)
+        .also_when_image(_Tpl("login_dialog.png",         # 图片条件 (AND, 仅 Template)
+                              threshold=0.8,
+                              record_pos=(0.5, 0.5),
+                              resolution=(1080, 1920)))
+        .cooldown(15)
+        .first_click())                                   # 仅点击 matches[0]
+
+    # & 运算符写法
+    (watcher.when("确认") & watcher.when_image("confirm_btn.png")).first_click()
 
     # 启动监控（每1秒截图一次）
     watcher.start(interval=1.0)

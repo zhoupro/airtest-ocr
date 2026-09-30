@@ -24,7 +24,7 @@ from .ocr_utils import OCRUtils, ocr_double_click, ocr_exists, ocr_find_nearest_
 # 导入OCR Watcher（后台监控器）
 try:
     from .ocr_watcher import AirtestDevice, AirtestImageMatcher, AirtestOcrEngine, DeviceController, ImageMatcher, \
-        ImageMatchResult, ImageWatcher, OcrEngine, OcrResult, OcrWatcher, TextWatcher, ocr_watcher
+        ImageMatchResult, ImageWatcher, MultiConditionWatcher, OcrEngine, OcrResult, OcrWatcher, TextWatcher, ocr_watcher
     _watcher_available = True
 except ImportError:
     _watcher_available = False
