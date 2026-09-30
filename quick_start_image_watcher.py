@@ -112,7 +112,7 @@ def mixed_text_and_image_example():
 
     # 文本规则
     ocr_watcher.when("允许").click()
-    ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+    ocr_watcher.when_re(r"\d+秒后跳过").click()
 
     # 图片规则
     ocr_watcher.when_image("tpl/skip_btn.png").click()

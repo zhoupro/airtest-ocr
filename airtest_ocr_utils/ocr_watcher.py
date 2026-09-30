@@ -453,6 +453,19 @@ class TextWatcher:
             cond,
         ])
 
+    def also_when_re(self, pattern: str) -> "MultiConditionWatcher":
+        """链式追加正则文本条件，返回 MultiConditionWatcher（AND 关系）。
+
+        等价于 ``also_when(pattern)`` 并将该条件的 ``match_mode`` 设为 ``regex``。
+        """
+        text_watcher = TextWatcher(self._parent, pattern)
+        text_watcher._match_mode = "regex"
+        cond = text_watcher._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
     def call(self, callback: Callable[[OcrResult, DeviceController], None]):
         """
         注册自定义回调
@@ -561,6 +574,19 @@ class ImageWatcher:
             cond,
         ])
 
+    def also_when_re(self, pattern: str) -> "MultiConditionWatcher":
+        """链式追加正则文本条件，返回 MultiConditionWatcher（AND 关系）。
+
+        等价于 ``also_when(pattern)`` 并将该条件的 ``match_mode`` 设为 ``regex``。
+        """
+        text_watcher = TextWatcher(self._parent, pattern)
+        text_watcher._match_mode = "regex"
+        cond = text_watcher._to_condition_dict()
+        return MultiConditionWatcher(self._parent, [
+            self._to_condition_dict(),
+            cond,
+        ])
+
     def call(self, callback: Callable[[ImageMatchResult, DeviceController], None]):
         """
         注册自定义回调
@@ -644,6 +670,17 @@ class MultiConditionWatcher:
         """链式追加图片条件（仅接收 airtest.Template 实例）。"""
         _require_template(template)
         cond = ImageWatcher(self._parent, template)._to_condition_dict()
+        self._conditions.append(cond)
+        return self
+
+    def also_when_re(self, pattern: str) -> "MultiConditionWatcher":
+        """链式追加正则文本条件。
+
+        等价于 ``also_when(pattern)`` 并将该条件的 ``match_mode`` 设为 ``regex``。
+        """
+        text_watcher = TextWatcher(self._parent, pattern)
+        text_watcher._match_mode = "regex"
+        cond = text_watcher._to_condition_dict()
         self._conditions.append(cond)
         return self
 
@@ -750,6 +787,15 @@ class OcrWatcher:
     def when(self, text: str) -> TextWatcher:
         """入口方法：创建新的文本监控规则"""
         return TextWatcher(self, text)
+
+    def when_re(self, pattern: str) -> TextWatcher:
+        """入口方法：创建新的正则匹配文本监控规则
+
+        等价于 ``when(pattern).match_mode("regex")``。
+        """
+        watcher = TextWatcher(self, pattern)
+        watcher._match_mode = "regex"
+        return watcher
 
     def when_image(self, template: Union[str, Template]) -> ImageWatcher:
         """入口方法：创建新的图片监控规则（语义：当图片出现，干啥）
@@ -1016,8 +1062,7 @@ if __name__ == "__main__":
 
     # 高级用法：正则匹配 + 自定义回调
     (watcher
-        .when(r"\d+秒后跳过")           # 倒计时广告
-        .match_mode("regex")
+        .when_re(r"\d+秒后跳过")        # 倒计时广告（正则）
         .click()
     )
 

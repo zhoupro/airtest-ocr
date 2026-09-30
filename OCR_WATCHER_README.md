@@ -177,7 +177,7 @@ ocr_watcher.stop()
 ```python
 # 处理广告弹窗
 ocr_watcher.when("跳过").click()
-ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+ocr_watcher.when_re(r"\d+秒后跳过").click()
 
 # 处理系统提示
 ocr_watcher.when("更新").cooldown(60).dismiss()

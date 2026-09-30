@@ -51,7 +51,7 @@ def test_advanced_watcher():
     ocr_watcher.when("允许").when("同意").when("授权").click()
 
     # 2. 正则匹配
-    ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+    ocr_watcher.when_re(r"\d+秒后跳过").click()
 
     # 3. 区域限制 + 冷却时间
     ocr_watcher.when("广告").region(0, 1200, 1080, 2400).cooldown(30).click()
@@ -157,7 +157,7 @@ def test_all_match_modes():
     print("✓ exact模式: 精确等于'确定'的文字")
 
     # regex: 正则匹配
-    ocr_watcher.when(r"\d+").match_mode("regex").call(
+    ocr_watcher.when_re(r"\d+").call(
         lambda res, dev: print(f"正则匹配: {res.text}")
     )
     print("✓ regex模式: 匹配数字")

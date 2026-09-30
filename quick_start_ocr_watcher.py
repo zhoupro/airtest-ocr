@@ -89,7 +89,7 @@ def advanced_example():
 
     # ==================== 功能2: 正则匹配 ====================
     print("\n功能2: 正则匹配")
-    ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+    ocr_watcher.when_re(r"\d+秒后跳过").click()
     print("✓ 配置完成：匹配倒计时广告")
 
     # ==================== 功能3: 区域限制 ====================

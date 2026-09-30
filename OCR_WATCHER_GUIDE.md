@@ -138,7 +138,7 @@ import time
 
 # 广告处理
 ocr_watcher.when("跳过").click()
-ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+ocr_watcher.when_re(r"\d+秒后跳过").click()
 
 # 权限处理
 ocr_watcher.when("允许").click()
@@ -308,10 +308,10 @@ ocr_watcher.when("确定").when("确认").when("OK").click()
 
 ```python
 # 匹配倒计时广告
-ocr_watcher.when(r"\d+秒后跳过").match_mode("regex").click()
+ocr_watcher.when_re(r"\d+秒后跳过").click()
 
 # 匹配价格
-ocr_watcher.when(r"￥\d+\.\d+").match_mode("regex").call(
+ocr_watcher.when_re(r"￥\d+\.\d+").call(
     lambda res, dev: print(f"发现价格: {res.text}")
 )
 ```
@@ -420,6 +420,7 @@ ocr_watcher.when("登录") \
 | `dismiss()` | - | 按返回键 |
 | `call(callback)` | `callback: Callable` | 自定义回调 |
 | `also_when(text)` | `text: str` | 链式追加文本条件（AND），返回 `MultiConditionWatcher` |
+| `also_when_re(pattern)` | `pattern: str` | 链式追加正则文本条件（AND），返回 `MultiConditionWatcher`；等价于 `also_when(pattern)` 并设为 regex 模式 |
 | `also_when_image(template)` | `template: Template` | 链式追加图片条件（AND），返回 `MultiConditionWatcher`；**仅接受 Template** |
 | `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符，等价于 also 组合 |
 
@@ -435,6 +436,7 @@ ocr_watcher.when("登录") \
 | `dismiss()` | - | 按返回键 |
 | `call(callback)` | `callback: Callable[[ImageMatchResult, DeviceController], None]` | 自定义回调 |
 | `also_when(text)` | `text: str` | 链式追加文本条件（AND），返回 `MultiConditionWatcher` |
+| `also_when_re(pattern)` | `pattern: str` | 链式追加正则文本条件（AND），返回 `MultiConditionWatcher`；等价于 `also_when(pattern)` 并设为 regex 模式 |
 | `also_when_image(template)` | `template: Template` | 链式追加图片条件（AND），返回 `MultiConditionWatcher`；**仅接受 Template** |
 | `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符，等价于 also 组合 |
 
@@ -443,6 +445,7 @@ ocr_watcher.when("登录") \
 | 方法 | 参数 | 说明 |
 |------|------|------|
 | `also_when(text)` | `text: str` | 继续追加文本条件（AND） |
+| `also_when_re(pattern)` | `pattern: str` | 继续追加正则文本条件（AND） |
 | `also_when_image(template)` | `template: Template` | 继续追加图片条件（AND）；**仅接受 Template** |
 | `__and__(other)` | `other: TextWatcher\|ImageWatcher\|MultiConditionWatcher` | `&` 运算符 |
 | `cooldown(seconds)` | `seconds: float` | 整组规则的冷却时间 |
