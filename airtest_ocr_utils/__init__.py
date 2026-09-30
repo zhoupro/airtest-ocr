@@ -17,7 +17,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 # 现在安全地导入OCR工具
-from .ocr_utils import OCRUtils, ocr_double_click, ocr_find_nearest_text_to_image, ocr_find_text_with_offset, \
+from .ocr_utils import OCRUtils, ocr_double_click, ocr_exists, ocr_find_nearest_text_to_image, ocr_find_text_with_offset, \
     ocr_get_all_texts, ocr_get_matched_texts, ocr_swipe, ocr_touch, ocr_touch_multiple, \
     ocr_touch_nearest_text_to_image, ocr_utils, ocr_wait_text
 
@@ -38,6 +38,7 @@ __all__ = [
     "ocr_touch_multiple",
     "ocr_find_text_with_offset",
     "ocr_wait_text",
+    "ocr_exists",
     "ocr_get_all_texts",
     "ocr_get_matched_texts",
     "ocr_find_nearest_text_to_image",

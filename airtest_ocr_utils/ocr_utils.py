@@ -527,40 +527,75 @@ class OCRUtils:
     
     def ocr_wait_text(self, text: str, confidence: float = None,
                      timeout: int = 10, region: Tuple[int, int, int, int] = None,
-                     match_mode: str = 'exact') -> bool:
+                     offset_x: int = 0, offset_y: int = 0,
+                     match_mode: str = 'exact') -> Optional[Tuple[float, float]]:
         """
-        等待文字出现
-        
+        等待文字出现，命中后返回其中心坐标（已叠加 offset_x / offset_y），
+        可直接传给 airtest 的 ``touch`` / ``double_click`` 等。
+
         Args:
-            text: 等待的文字
+            text: 等待的文字；match_mode='regex' 时为正则表达式（re.search）
             confidence: 置信度阈值
             timeout: 超时时间(秒)
             region: 截图区域 (x1, y1, x2, y2)，如果为None则截取全屏
+            offset_x: 返回坐标上的 X 轴偏移量
+            offset_y: 返回坐标上的 Y 轴偏移量
             match_mode: 匹配模式
                 'exact' - 精确匹配（默认）
                 'contains' - 包含匹配
                 'startswith' - 开头匹配
                 'endswith' - 结尾匹配
                 'regex' - 正则表达式匹配
-            
+
         Returns:
-            是否在超时时间内找到文字
+            命中文字的中心坐标 ``(x, y)``，叠加偏移；超时未命中返回 ``None``。
         """
         if confidence is None:
             confidence = self.confidence_threshold
-            
+
         start_time = time.time()
         while time.time() - start_time < timeout:
             results = self.ocr_recognize(region=region)
-            
+
             for result in results:
                 if self._text_match(result['text'], text, match_mode) and result['confidence'] >= confidence:
-                    return True
-                    
+                    cx, cy = result['center']
+                    return (cx + offset_x, cy + offset_y)
+
             time.sleep(1)
-            
+
+        return None
+
+    def ocr_exists(self, text: str, confidence: float = None,
+                   region: Tuple[int, int, int, int] = None,
+                   match_mode: str = 'exact') -> bool:
+        """
+        判断文字是否存在于当前屏幕（单次检测，不重试、不等待）。
+
+        Args:
+            text: 目标文字；match_mode='regex' 时为正则表达式
+                （re.search 语义，原样传入即可）。
+            confidence: 置信度阈值，None 时使用全局阈值。
+            region: 截图区域 (x1, y1, x2, y2)，None 则截取全屏。
+            match_mode: 匹配模式
+                'exact' - 精确匹配（默认）
+                'contains' - 包含匹配
+                'startswith' - 开头匹配
+                'endswith' - 结尾匹配
+                'regex' - 正则表达式匹配（re.search）
+
+        Returns:
+            是否存在匹配文字。
+        """
+        if confidence is None:
+            confidence = self.confidence_threshold
+
+        results = self.ocr_recognize(region=region)
+        for result in results:
+            if self._text_match(result['text'], text, match_mode) and result['confidence'] >= confidence:
+                return True
         return False
-    
+
     def _text_match(self, actual_text: str, target_text: str, match_mode: str) -> bool:
         """
         文本匹配方法
@@ -860,6 +895,20 @@ def ocr_find_text_with_offset(text: str, offset_x: int, offset_y: int, **kwargs)
 def ocr_wait_text(text: str, **kwargs):
     """便捷等待文字函数"""
     return ocr_utils.ocr_wait_text(text, **kwargs)
+
+def ocr_exists(text: str, **kwargs):
+    """
+    便捷函数：判断文字是否存在于当前屏幕（单次检测）。
+
+    支持正则：match_mode='regex' 时 text 视为 re.search 模式。
+
+    示例：
+        # 精确匹配
+        ocr_exists("确定")
+        # 正则：是否存在以"订单"开头的文字
+        ocr_exists(r"^订单\\d+$", match_mode="regex")
+    """
+    return ocr_utils.ocr_exists(text, **kwargs)
 
 def ocr_get_all_texts(**kwargs):
     """便捷获取所有文字函数"""
