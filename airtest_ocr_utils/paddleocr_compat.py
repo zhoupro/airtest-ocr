@@ -44,8 +44,12 @@ def create_paddleocr(lang: str = "ch", use_gpu: bool = False):
     return PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=use_gpu)
 
 
-def run_paddleocr(ocr, image_path: str):
-    """执行识别，屏蔽 2.x / 3.x 的调用差异"""
+def run_paddleocr(ocr, image_path):
+    """执行识别，屏蔽 2.x / 3.x 的调用差异
+
+    image_path: 图片路径或内存图像（np.ndarray / PIL.Image），
+    PaddleOCR 2.x/3.x 均支持直接传 ndarray（BGR）。
+    """
     if hasattr(ocr, "predict"):
         return ocr.predict(image_path)
     return ocr.ocr(image_path, cls=True)

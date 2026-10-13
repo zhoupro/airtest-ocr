@@ -466,10 +466,14 @@ class TextWatcher:
             cond,
         ])
 
-    def call(self, callback: Callable[[OcrResult, DeviceController], None]):
+    def call(self, callback: Callable[[OcrResult, DeviceController], None]) -> "OcrWatcher":
         """
-        注册自定义回调
+        注册自定义回调（终止方法）
         callback: function(ocr_result, device)
+
+        Returns:
+            父 OcrWatcher，便于继续链式注册下一条独立规则：
+            ``watcher.when("A").click().when("B").dismiss()``
         """
         rule = self._to_condition_dict()
         rule.update({
@@ -478,7 +482,7 @@ class TextWatcher:
             "last_triggered": self._last_triggered,
         })
         self._parent._watchers.append(rule)
-        return self
+        return self._parent
 
     def click(self):
         """内置回调：点击识别到的文字中心位置"""
@@ -587,10 +591,14 @@ class ImageWatcher:
             cond,
         ])
 
-    def call(self, callback: Callable[[ImageMatchResult, DeviceController], None]):
+    def call(self, callback: Callable[[ImageMatchResult, DeviceController], None]) -> "OcrWatcher":
         """
-        注册自定义回调
+        注册自定义回调（终止方法）
         callback: function(image_match_result, device)
+
+        Returns:
+            父 OcrWatcher，便于继续链式注册下一条独立规则：
+            ``watcher.when_image("a.png").click().when("B").dismiss()``
         """
         rule = self._to_condition_dict()
         rule.update({
@@ -599,7 +607,7 @@ class ImageWatcher:
             "last_triggered": self._last_triggered,
         })
         self._parent._watchers.append(rule)
-        return self
+        return self._parent
 
     def click(self):
         """内置回调：点击命中图片的中心位置"""
@@ -700,12 +708,15 @@ class MultiConditionWatcher:
         return out
 
     def call(self, callback: Callable[[List[Union[OcrResult, ImageMatchResult]], DeviceController], None]
-             ) -> "MultiConditionWatcher":
-        """注册自定义回调。
+             ) -> "OcrWatcher":
+        """注册自定义回调（终止方法）。
 
         callback 签名: ``callback(matches, device)``
         - ``matches``: 按声明顺序排列的命中结果列表（任一元素为 OcrResult 或 ImageMatchResult）
         - ``device``: 设备控制器
+
+        Returns:
+            父 OcrWatcher，便于继续链式注册下一条独立规则。
         """
         rule = {
             "type": "compound",
@@ -715,7 +726,7 @@ class MultiConditionWatcher:
             "last_triggered": self._last_triggered,
         }
         self._parent._watchers.append(rule)
-        return self
+        return self._parent
 
     def first_click(self) -> "MultiConditionWatcher":
         """内置回调：仅点击第一个命中位置的中心点（多条件满足时取 matches[0]）。"""
